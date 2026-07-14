@@ -152,10 +152,53 @@ class CampusSettings(models.Model):
     class Meta:
         verbose_name_plural = "Campus settings"
 
+    _lifetime_ready = False
+
     def __str__(self) -> str:
         return self.name
 
     @classmethod
+    def ensure_lifetime_columns(cls) -> None:
+        """
+        Add lifetime_* columns if a deploy raced ahead of migrate.
+        Safe to call repeatedly (PostgreSQL IF NOT EXISTS / SQLite pragma).
+        """
+        if cls._lifetime_ready:
+            return
+        from django.db import connection
+
+        table = cls._meta.db_table
+        try:
+            with connection.cursor() as cursor:
+                if connection.vendor == "postgresql":
+                    cursor.execute(
+                        f"ALTER TABLE {table} "
+                        "ADD COLUMN IF NOT EXISTS lifetime_approved integer DEFAULT 0 NOT NULL"
+                    )
+                    cursor.execute(
+                        f"ALTER TABLE {table} "
+                        "ADD COLUMN IF NOT EXISTS lifetime_rejected integer DEFAULT 0 NOT NULL"
+                    )
+                elif connection.vendor == "sqlite":
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    cols = {row[1] for row in cursor.fetchall()}
+                    if "lifetime_approved" not in cols:
+                        cursor.execute(
+                            f"ALTER TABLE {table} "
+                            "ADD COLUMN lifetime_approved integer DEFAULT 0 NOT NULL"
+                        )
+                    if "lifetime_rejected" not in cols:
+                        cursor.execute(
+                            f"ALTER TABLE {table} "
+                            "ADD COLUMN lifetime_rejected integer DEFAULT 0 NOT NULL"
+                        )
+            cls._lifetime_ready = True
+        except Exception:
+            # Leave flag false so a later request can retry after DB is up
+            pass
+
+    @classmethod
     def get_solo(cls) -> "CampusSettings":
+        cls.ensure_lifetime_columns()
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj

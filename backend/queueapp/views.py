@@ -155,6 +155,7 @@ def remove_queue_entry(entry):
 
 def build_queue_counts():
     """Live queue statuses plus lifetime approved/rejected desk totals."""
+    CampusSettings.ensure_lifetime_columns()
     counts = QueueEntry.objects.aggregate(
         total=Count("id"),
         waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
@@ -164,9 +165,17 @@ def build_queue_counts():
         rejected_live=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
         skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
     )
-    campus = CampusSettings.get_solo()
-    counts["approved"] = (campus.lifetime_approved or 0) + (counts.pop("approved_live") or 0)
-    counts["rejected"] = (campus.lifetime_rejected or 0) + (counts.pop("rejected_live") or 0)
+    approved_live = counts.pop("approved_live") or 0
+    rejected_live = counts.pop("rejected_live") or 0
+    try:
+        campus = CampusSettings.get_solo()
+        lifetime_approved = int(getattr(campus, "lifetime_approved", 0) or 0)
+        lifetime_rejected = int(getattr(campus, "lifetime_rejected", 0) or 0)
+    except Exception:
+        lifetime_approved = 0
+        lifetime_rejected = 0
+    counts["approved"] = lifetime_approved + approved_live
+    counts["rejected"] = lifetime_rejected + rejected_live
     counts["remaining"] = counts["waiting"] or 0
     return counts
 
@@ -918,6 +927,7 @@ class CompleteVerificationView(APIView):
 
         removed_from_queue = False
         if decision in ("approved", "rejected"):
+            CampusSettings.ensure_lifetime_columns()
             campus = CampusSettings.get_solo()
             if decision == "approved":
                 CampusSettings.objects.filter(pk=campus.pk).update(

@@ -9,6 +9,7 @@ def is_on_campus(latitude: float, longitude: float) -> tuple[bool, float, float]
     Return (allowed, distance_meters, radius_meters).
     Uses CampusSettings if present, else env defaults.
     """
+    CampusSettings.ensure_lifetime_columns()
     campus = CampusSettings.objects.first()
     if campus:
         center = (float(campus.latitude), float(campus.longitude))

@@ -70,13 +70,38 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
-function errorFromPayload(data, fallback = 'Request failed') {
+function looksLikeHtml(text) {
+  const t = String(text || '').trim().toLowerCase();
+  return (
+    t.startsWith('<!doctype') ||
+    t.startsWith('<html') ||
+    t.includes('<h1>server error') ||
+    t.includes('server error (500)')
+  );
+}
+
+function humanizeHttpError(status, fallback = 'Request failed') {
+  if (status === 502 || status === 503 || status === 504) {
+    return 'KabQue API is unavailable. Try again in a moment.';
+  }
+  if (status >= 500) {
+    return 'Server error. Please refresh and try again.';
+  }
+  if (status === 404) {
+    return 'Service endpoint not found. Please try again or refresh the page.';
+  }
+  return fallback;
+}
+
+function errorFromPayload(data, fallback = 'Request failed', status = 0) {
+  if (status >= 500) {
+    return humanizeHttpError(status, fallback);
+  }
   if (data == null) return fallback;
   if (typeof data === 'string') {
     const text = data.trim();
-    // Never surface Vercel's raw deployment 404 page to the UI
-    if (/NOT_FOUND/i.test(text) || /Code:\s*NOT_FOUND/i.test(text)) {
-      return 'Service endpoint not found. Please try again or refresh the page.';
+    if (looksLikeHtml(text) || /NOT_FOUND/i.test(text) || /Code:\s*NOT_FOUND/i.test(text)) {
+      return humanizeHttpError(status || 500, fallback);
     }
     return text || fallback;
   }
@@ -97,8 +122,8 @@ function errorFromPayload(data, fallback = 'Request failed') {
       }
     }
     const detailText = String(detail);
-    if (/NOT_FOUND/i.test(detailText)) {
-      return 'Service endpoint not found. Please try again or refresh the page.';
+    if (looksLikeHtml(detailText) || /NOT_FOUND/i.test(detailText) || /Server Error \(500\)/i.test(detailText)) {
+      return humanizeHttpError(status || 500, fallback);
     }
     return detailText;
   }
@@ -115,8 +140,8 @@ function errorFromPayload(data, fallback = 'Request failed') {
         .map(String);
       if (parts.length) {
         const joined = parts.join(' ');
-        if (/NOT_FOUND/i.test(joined)) {
-          return 'Service endpoint not found. Please try again or refresh the page.';
+        if (looksLikeHtml(joined) || /NOT_FOUND/i.test(joined) || /Server Error \(500\)/i.test(joined)) {
+          return humanizeHttpError(status || 500, fallback);
         }
         return joined;
       }
@@ -151,10 +176,14 @@ async function request(path, { method = 'GET', body, auth = true, _retried = fal
 
   let data = null;
   const text = await res.text();
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { detail: text };
+  if (looksLikeHtml(text)) {
+    data = null;
+  } else {
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text ? { detail: text } : null;
+    }
   }
 
   if (res.status === 401 && auth && !_retried) {
@@ -168,9 +197,8 @@ async function request(path, { method = 'GET', body, auth = true, _retried = fal
     const err = new Error(
       errorFromPayload(
         data,
-        res.status === 502 || res.status === 503 || res.status === 504
-          ? 'KabQue API is unavailable. Try again in a moment.'
-          : 'Request failed'
+        humanizeHttpError(res.status, 'Request failed'),
+        res.status
       )
     );
     err.status = res.status;

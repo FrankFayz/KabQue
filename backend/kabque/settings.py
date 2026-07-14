@@ -33,7 +33,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "corsheaders",
     "django_filters",
-    "queueapp",
+    "queueapp.apps.QueueappConfig",
 ]
 
 MIDDLEWARE = [
