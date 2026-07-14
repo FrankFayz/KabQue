@@ -16,7 +16,7 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState('');
   const [batchSize, setBatchSize] = useState(20);
   const [scheduledDate, setScheduledDate] = useState('');
-  const [channel, setChannel] = useState('email');
+  const [channel, setChannel] = useState('both');
   const [secretCode, setSecretCode] = useState('');
   const [verified, setVerified] = useState(null);
   const [notifyResult, setNotifyResult] = useState(null);

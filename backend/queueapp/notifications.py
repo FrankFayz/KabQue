@@ -31,6 +31,42 @@ def build_approval_message(
     )
 
 
+def build_approval_sms(
+    *,
+    full_name: str,
+    registration_number: str,
+    scheduled_date,
+    secret_code: str,
+    position: int,
+) -> str:
+    date_str = scheduled_date.strftime("%d %b %Y")
+    first = (full_name or "student").strip().split()[0]
+    return (
+        f"KabQue: Hi {first}, report for document approval on {date_str}. "
+        f"Reg {registration_number}, queue #{position}. "
+        f"SECRET CODE: {secret_code}. Do not share. — Kabale University"
+    )
+
+
+def normalize_phone(phone: str) -> str:
+    """Normalize local UG numbers to E.164 (+256...)."""
+    raw = (phone or "").strip()
+    if not raw:
+        return ""
+    digits = re.sub(r"[^\d+]", "", raw)
+    if digits.startswith("00"):
+        digits = "+" + digits[2:]
+    if digits.startswith("+"):
+        return digits
+    if digits.startswith("256") and len(digits) >= 12:
+        return "+" + digits
+    if digits.startswith("0") and len(digits) >= 9:
+        return "+256" + digits[1:]
+    if len(digits) in (9, 10) and digits[0] in "79":
+        return "+256" + digits
+    return digits if digits.startswith("+") else f"+{digits}" if digits else ""
+
+
 def _parse_from_email(value: str) -> tuple[str, str]:
     """Return (name, email) from 'Name <email@x.com>' or bare email."""
     value = (value or "").strip()
@@ -95,7 +131,6 @@ def send_email_notification(to_email: str, subject: str, body: str) -> tuple[boo
     if not to_email:
         return False, "No email address on student profile"
 
-    # Prefer Brevo API when configured (production)
     if (getattr(settings, "BREVO_API_KEY", "") or "").strip():
         return _send_via_brevo(to_email, subject, body)
 
@@ -113,22 +148,79 @@ def send_email_notification(to_email: str, subject: str, body: str) -> tuple[boo
         return False, str(exc)
 
 
-def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
-    """
-    SMS via Africa's Talking when credentials are set; otherwise log to console.
-    """
-    if not phone:
-        return False, "No phone number"
+def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
+    api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
+    if not api_key:
+        return False, "MYSMSGATE_API_KEY not configured"
 
-    username = settings.AFRICAS_TALKING_USERNAME
-    api_key = settings.AFRICAS_TALKING_API_KEY
+    endpoint = (
+        getattr(settings, "MYSMSGATE_API_URL", "") or "https://mysmsgate.net/api/v1/send"
+    ).strip()
+
+    payload = {
+        "to": to_phone,
+        "message": message[:1000],
+    }
+    device_id = (getattr(settings, "MYSMSGATE_DEVICE_ID", "") or "").strip()
+    if device_id:
+        payload["device_id"] = device_id
+
+    sim_slot = getattr(settings, "MYSMSGATE_SIM_SLOT", None)
+    if sim_slot is not None and str(sim_slot).strip() != "":
+        try:
+            payload["slot"] = int(sim_slot)
+        except (TypeError, ValueError):
+            pass
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    if parsed.get("success") is False:
+                        return False, str(parsed.get("message") or parsed)
+                except json.JSONDecodeError:
+                    pass
+        return True, ""
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        logger.error("MySMSGate SMS failed (%s): %s", exc.code, detail)
+        return False, f"MySMSGate HTTP {exc.code}: {detail}"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("MySMSGate SMS failed")
+        return False, str(exc)
+
+
+def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
+    """Send SMS via MySMSGate (primary). Falls back to Africa's Talking if configured."""
+    to_phone = normalize_phone(phone)
+    if not to_phone:
+        return False, "No phone number on student profile"
+
+    if (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip():
+        return _send_via_mysmsgate(to_phone, body)
+
+    username = getattr(settings, "AFRICAS_TALKING_USERNAME", "") or ""
+    api_key = getattr(settings, "AFRICAS_TALKING_API_KEY", "") or ""
 
     if username and api_key:
         try:
             data = json.dumps(
                 {
                     "username": username,
-                    "to": phone,
+                    "to": to_phone,
                     "message": body[:480],
                 }
             ).encode()
@@ -149,7 +241,6 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
             logger.exception("SMS send failed")
             return False, str(exc)
 
-    # Dev fallback: print so you can still demo without an SMS gateway
-    logger.info("SMS (console) to %s:\n%s", phone, body)
-    print(f"\n=== KabQue SMS -> {phone} ===\n{body}\n============================\n")
+    logger.info("SMS (console) to %s:\n%s", to_phone, body)
+    print(f"\n=== KabQue SMS -> {to_phone} ===\n{body}\n============================\n")
     return True, "logged_to_console"

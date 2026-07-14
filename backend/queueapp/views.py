@@ -10,6 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import CampusSettings, NotificationBatch, NotificationLog, QueueEntry, StudentProfile
 from .notifications import (
     build_approval_message,
+    build_approval_sms,
     send_email_notification,
     send_sms_notification,
 )
@@ -122,6 +123,13 @@ def apply_reschedule(entry, scheduled_date, *, notify=True):
             secret_code=code,
             position=entry.position,
         )
+        sms_body = build_approval_sms(
+            full_name=entry.student.full_name,
+            registration_number=entry.student.registration_number,
+            scheduled_date=scheduled_date,
+            secret_code=code,
+            position=entry.position,
+        )
         subject = f"KabQue: Rescheduled approval on {scheduled_date.isoformat()}"
         email = entry.student.user.email
         phone = entry.student.user.phone
@@ -129,7 +137,7 @@ def apply_reschedule(entry, scheduled_date, *, notify=True):
             ok, err = send_email_notification(email, subject, body)
             channels.append({"channel": "email", "success": ok, "error": err})
         if phone:
-            ok, err = send_sms_notification(phone, body)
+            ok, err = send_sms_notification(phone, sms_body)
             channels.append({"channel": "sms", "success": ok, "error": err})
 
     return code, channels
@@ -624,6 +632,8 @@ class NotifyBatchView(APIView):
         results = []
         email_ok = 0
         email_fail = 0
+        sms_ok = 0
+        sms_fail = 0
         now = timezone.now()
         for entry in entries:
             code = entry.assign_secret_code()
@@ -641,6 +651,13 @@ class NotifyBatchView(APIView):
             )
 
             body = build_approval_message(
+                full_name=entry.student.full_name,
+                registration_number=entry.student.registration_number,
+                scheduled_date=scheduled_date,
+                secret_code=code,
+                position=entry.position,
+            )
+            sms_body = build_approval_sms(
                 full_name=entry.student.full_name,
                 registration_number=entry.student.registration_number,
                 scheduled_date=scheduled_date,
@@ -670,13 +687,17 @@ class NotifyBatchView(APIView):
                 channels_tried.append({"channel": "email", "success": ok, "error": err})
 
             if channel in ("sms", "both"):
-                ok, err = send_sms_notification(entry.student.user.phone, body)
+                ok, err = send_sms_notification(entry.student.user.phone, sms_body)
+                if ok:
+                    sms_ok += 1
+                else:
+                    sms_fail += 1
                 NotificationLog.objects.create(
                     batch=batch,
                     queue_entry=entry,
                     channel="sms",
                     destination=entry.student.user.phone or "",
-                    body=body,
+                    body=sms_body,
                     success=ok,
                     error_message=err,
                 )
@@ -688,6 +709,7 @@ class NotifyBatchView(APIView):
                     "registration_number": entry.student.registration_number,
                     "full_name": entry.student.full_name,
                     "email": entry.student.user.email or "",
+                    "phone": entry.student.user.phone or "",
                     "secret_code": code,
                     "scheduled_date": scheduled_date.isoformat(),
                     "channels": channels_tried,
@@ -709,7 +731,11 @@ class NotifyBatchView(APIView):
         if channel in ("email", "both"):
             message += f" Emails sent: {email_ok}."
             if email_fail:
-                message += f" Email failures: {email_fail} (check student emails / Brevo sender)."
+                message += f" Email failures: {email_fail}."
+        if channel in ("sms", "both"):
+            message += f" SMS sent: {sms_ok}."
+            if sms_fail:
+                message += f" SMS failures: {sms_fail} (check phone format / MySMSGate device online)."
 
         return Response(
             {
@@ -720,6 +746,8 @@ class NotifyBatchView(APIView):
                 "notified_count": len(results),
                 "emails_sent": email_ok,
                 "emails_failed": email_fail,
+                "sms_sent": sms_ok,
+                "sms_failed": sms_fail,
                 "shortage": shortage,
                 "remaining": remaining,
                 "students": results,

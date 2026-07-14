@@ -171,5 +171,13 @@ CAMPUS_RADIUS_METERS = float(os.getenv("CAMPUS_RADIUS_METERS", "500000"))
 GPS_ENFORCEMENT = os.getenv("GPS_ENFORCEMENT", "True").lower() in ("1", "true", "yes")
 CAMPUS_NAME = os.getenv("CAMPUS_NAME", "Uganda (nationwide testing)")
 
+# MySMSGate — SMS via your connected Android phone
+MYSMSGATE_API_KEY = os.getenv("MYSMSGATE_API_KEY", "")
+MYSMSGATE_API_URL = os.getenv(
+    "MYSMSGATE_API_URL", "https://mysmsgate.net/api/v1/send"
+)
+MYSMSGATE_DEVICE_ID = os.getenv("MYSMSGATE_DEVICE_ID", "")
+MYSMSGATE_SIM_SLOT = os.getenv("MYSMSGATE_SIM_SLOT", "")
+
 AFRICAS_TALKING_USERNAME = os.getenv("AFRICAS_TALKING_USERNAME", "")
 AFRICAS_TALKING_API_KEY = os.getenv("AFRICAS_TALKING_API_KEY", "")
