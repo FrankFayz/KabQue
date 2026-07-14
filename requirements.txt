@@ -1,3 +1,5 @@
+# Render installs from the repository root.
+# Keep in sync with backend/requirements.txt
 Django>=5.0,<7
 djangorestframework>=3.15
 djangorestframework-simplejwt>=5.3
