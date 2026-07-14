@@ -97,6 +97,11 @@ export default function VerifyCodePanel({
             <p className="verify-chip">Already checked in</p>
           )}
 
+          <p className="muted verify-auto-leave">
+            Approve or reject to finish — the student leaves the live queue automatically.
+            Use No-show to keep them in the queue.
+          </p>
+
           <div className="cta-row">
             <button
               type="button"

@@ -116,7 +116,11 @@ class NotificationLog(models.Model):
         NotificationBatch, on_delete=models.CASCADE, related_name="logs"
     )
     queue_entry = models.ForeignKey(
-        QueueEntry, on_delete=models.CASCADE, related_name="notifications"
+        QueueEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notifications",
     )
     channel = models.CharField(max_length=20)
     destination = models.CharField(max_length=255)
@@ -140,6 +144,9 @@ class CampusSettings(models.Model):
     radius_meters = models.PositiveIntegerField(default=500000)
     gps_enforcement = models.BooleanField(default=True)
     default_daily_batch_size = models.PositiveIntegerField(default=50)
+    # Persist desk outcomes after students leave the live queue
+    lifetime_approved = models.PositiveIntegerField(default=0)
+    lifetime_rejected = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

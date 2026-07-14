@@ -174,27 +174,6 @@ export default function AdminDashboard() {
     }
   }
 
-  async function removeEntry(row) {
-    const name = row.student?.full_name || row.student?.registration_number || 'student';
-    const ok = window.confirm(`Remove ${name} from the queue?`);
-    if (!ok) return;
-    setQueueBusy(true);
-    setQueueError('');
-    setQueueMessage('');
-    try {
-      const data = await api('/admin/remove-from-queue/', {
-        method: 'POST',
-        body: { queue_entry_id: row.id },
-      });
-      setQueueMessage(data.message || 'Removed from queue.');
-      await load();
-    } catch (err) {
-      setQueueError(err.message);
-    } finally {
-      setQueueBusy(false);
-    }
-  }
-
   return (
     <section className="dash">
       <PageHeader
@@ -273,7 +252,6 @@ export default function AdminDashboard() {
         onStatusChange={setStatus}
         onSearchChange={setSearch}
         onReschedule={rescheduleEntry}
-        onRemove={removeEntry}
       />
     </section>
   );

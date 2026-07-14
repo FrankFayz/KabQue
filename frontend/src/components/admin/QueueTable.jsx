@@ -9,8 +9,6 @@ const STATUS_OPTIONS = [
   'waiting',
   'notified',
   'checked_in',
-  'approved',
-  'rejected',
   'skipped',
 ];
 
@@ -28,10 +26,6 @@ function canReschedule(row) {
   );
 }
 
-function canRemove(row) {
-  return !['approved', 'rejected'].includes(row.status);
-}
-
 export default function QueueTable({
   queue = [],
   status,
@@ -40,7 +34,6 @@ export default function QueueTable({
   onStatusChange,
   onSearchChange,
   onReschedule,
-  onRemove,
 }) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -82,8 +75,9 @@ export default function QueueTable({
           <p className="queue-opener-kicker">Live queue</p>
           <h2>Browse students in order</h2>
           <p>
-            First-come first-served. Open the queue to review the top 10, then move
-            forward or back in sets of 10.
+            First-come first-served. Open the queue to review students in order.
+            After you approve or reject with a secret code, they leave the queue
+            automatically.
           </p>
           <dl className="queue-opener-meta">
             <div>
@@ -108,23 +102,21 @@ export default function QueueTable({
       <div className="queue-browser-head">
         <div>
           <p className="queue-browser-kicker">Queue order</p>
-          <h2>Students {from}–{to}</h2>
+          <h2>
+            Students {from}–{to}
+          </h2>
           <p className="muted">
             {ordered.length} student{ordered.length === 1 ? '' : 's'} · page{' '}
             {ordered.length ? safePage + 1 : 0} of {ordered.length ? totalPages : 0}
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={() => setOpen(false)}
-        >
+        <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>
           Close
         </button>
       </div>
 
       <div className="table-tools queue-browser-tools">
-        <div className="filters">
+        <div className="filters queue-browser-filters">
           <select value={status} onChange={(e) => onStatusChange(e.target.value)}>
             {STATUS_OPTIONS.map((s) => (
               <option key={s || 'all'} value={s}>
@@ -188,40 +180,28 @@ export default function QueueTable({
                 </div>
               </div>
 
-              <div className="queue-row-actions">
-                {canReschedule(row) && (
-                  <>
-                    <input
-                      type="date"
-                      className="queue-row-date"
-                      value={dateFor(row)}
-                      min={new Date().toISOString().slice(0, 10)}
-                      onChange={(e) =>
-                        setDates((prev) => ({ ...prev, [row.id]: e.target.value }))
-                      }
-                      disabled={busy}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-tiny btn-primary"
-                      disabled={busy}
-                      onClick={() => onReschedule?.(row.id, dateFor(row))}
-                    >
-                      Reschedule
-                    </button>
-                  </>
-                )}
-                {canRemove(row) && (
+              {canReschedule(row) ? (
+                <div className="queue-row-actions">
+                  <input
+                    type="date"
+                    className="queue-row-date"
+                    value={dateFor(row)}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={(e) =>
+                      setDates((prev) => ({ ...prev, [row.id]: e.target.value }))
+                    }
+                    disabled={busy}
+                  />
                   <button
                     type="button"
-                    className="btn btn-tiny btn-danger-outline"
+                    className="btn btn-tiny btn-primary"
                     disabled={busy}
-                    onClick={() => onRemove?.(row)}
+                    onClick={() => onReschedule?.(row.id, dateFor(row))}
                   >
-                    Remove
+                    Reschedule
                   </button>
-                )}
-              </div>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>

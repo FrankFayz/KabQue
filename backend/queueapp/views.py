@@ -1,6 +1,6 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -151,6 +151,24 @@ def remove_queue_entry(entry):
     profile.save(update_fields=["joined_queue_at"])
     renumber_queue_positions()
     return profile
+
+
+def build_queue_counts():
+    """Live queue statuses plus lifetime approved/rejected desk totals."""
+    counts = QueueEntry.objects.aggregate(
+        total=Count("id"),
+        waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
+        notified=Count("id", filter=Q(status=QueueEntry.Status.NOTIFIED)),
+        checked_in=Count("id", filter=Q(status=QueueEntry.Status.CHECKED_IN)),
+        approved_live=Count("id", filter=Q(status=QueueEntry.Status.APPROVED)),
+        rejected_live=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
+        skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
+    )
+    campus = CampusSettings.get_solo()
+    counts["approved"] = (campus.lifetime_approved or 0) + (counts.pop("approved_live") or 0)
+    counts["rejected"] = (campus.lifetime_rejected or 0) + (counts.pop("rejected_live") or 0)
+    counts["remaining"] = counts["waiting"] or 0
+    return counts
 
 
 def profile_payload(profile, request=None):
@@ -520,15 +538,7 @@ class AdminDashboardView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
-        counts = QueueEntry.objects.aggregate(
-            total=Count("id"),
-            waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
-            notified=Count("id", filter=Q(status=QueueEntry.Status.NOTIFIED)),
-            checked_in=Count("id", filter=Q(status=QueueEntry.Status.CHECKED_IN)),
-            approved=Count("id", filter=Q(status=QueueEntry.Status.APPROVED)),
-            rejected=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
-            skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
-        )
+        counts = build_queue_counts()
         by_faculty = list(
             QueueEntry.objects.values("student__faculty")
             .annotate(count=Count("id"))
@@ -539,7 +549,7 @@ class AdminDashboardView(APIView):
             .annotate(count=Count("id"))
             .order_by("student__faculty", "-count", "student__programme")
         )
-        # Only students currently in the queue (join adds, leave removes).
+        # Only students currently in the queue (join adds, leave / approve removes).
         by_faculty = [
             {"faculty": row["student__faculty"] or "", "count": row["count"]}
             for row in by_faculty
@@ -553,13 +563,9 @@ class AdminDashboardView(APIView):
             for row in by_programme
         ]
         campus = CampusSettings.get_solo()
-        remaining = counts["waiting"] or 0
         return Response(
             {
-                "counts": {
-                    **counts,
-                    "remaining": remaining,
-                },
+                "counts": counts,
                 "by_faculty": by_faculty,
                 "by_programme": by_programme,
                 "campus": CampusSettingsSerializer(campus).data,
@@ -835,16 +841,7 @@ class VerifyCodeView(APIView):
                 f"Scheduled day is {scheduled.isoformat()}, not today ({today.isoformat()})."
             )
 
-        counts = QueueEntry.objects.aggregate(
-            total=Count("id"),
-            waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
-            notified=Count("id", filter=Q(status=QueueEntry.Status.NOTIFIED)),
-            checked_in=Count("id", filter=Q(status=QueueEntry.Status.CHECKED_IN)),
-            approved=Count("id", filter=Q(status=QueueEntry.Status.APPROVED)),
-            rejected=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
-            skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
-        )
-        counts["remaining"] = counts["waiting"] or 0
+        counts = build_queue_counts()
 
         message = (
             "Identity confirmed and checked in."
@@ -871,11 +868,13 @@ class CompleteVerificationView(APIView):
 
     permission_classes = [IsQueueAdmin]
 
+    @transaction.atomic
     def post(self, request):
         serializer = CompleteVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         entry = (
             QueueEntry.objects.select_related("student", "student__user")
+            .select_for_update()
             .filter(id=serializer.validated_data["queue_entry_id"])
             .first()
         )
@@ -897,7 +896,8 @@ class CompleteVerificationView(APIView):
         # Ensure they were at least checked in before approve/reject
         if (
             decision in ("approved", "rejected")
-            and entry.status not in (
+            and entry.status
+            not in (
                 QueueEntry.Status.CHECKED_IN,
                 QueueEntry.Status.NOTIFIED,
             )
@@ -912,33 +912,40 @@ class CompleteVerificationView(APIView):
         entry.status = decision
         entry.verified_at = timezone.now()
         entry.verification_notes = serializer.validated_data.get("notes", "")
-        if decision == "skipped" and not entry.checked_in_at:
-            # no-show without desk check-in
-            pass
         entry.save(
             update_fields=["status", "verified_at", "verification_notes", "updated_at"]
         )
 
-        counts = QueueEntry.objects.aggregate(
-            total=Count("id"),
-            waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
-            notified=Count("id", filter=Q(status=QueueEntry.Status.NOTIFIED)),
-            checked_in=Count("id", filter=Q(status=QueueEntry.Status.CHECKED_IN)),
-            approved=Count("id", filter=Q(status=QueueEntry.Status.APPROVED)),
-            rejected=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
-            skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
-        )
-        counts["remaining"] = counts["waiting"] or 0
+        removed_from_queue = False
+        if decision in ("approved", "rejected"):
+            campus = CampusSettings.get_solo()
+            if decision == "approved":
+                CampusSettings.objects.filter(pk=campus.pk).update(
+                    lifetime_approved=F("lifetime_approved") + 1
+                )
+            else:
+                CampusSettings.objects.filter(pk=campus.pk).update(
+                    lifetime_rejected=F("lifetime_rejected") + 1
+                )
+            # Leave live browse automatically — invigilators do not manually delete
+            remove_queue_entry(entry)
+            removed_from_queue = True
+            entry_payload = None
+        else:
+            entry_payload = AdminQueueEntrySerializer(entry).data
+
+        counts = build_queue_counts()
 
         labels = {
-            "approved": "Approved — documents accepted.",
-            "rejected": "Rejected — documents not accepted.",
-            "skipped": "Marked as no-show.",
+            "approved": "Approved — documents accepted. Student removed from the live queue.",
+            "rejected": "Rejected — documents not accepted. Student removed from the live queue.",
+            "skipped": "Marked as no-show. Student stays in the queue for a return visit.",
         }
         return Response(
             {
                 "message": labels.get(decision, f"Marked as {decision}."),
-                "entry": AdminQueueEntrySerializer(entry).data,
+                "entry": entry_payload,
+                "removed_from_queue": removed_from_queue,
                 "counts": counts,
             }
         )
@@ -987,39 +994,20 @@ class AdminRescheduleView(APIView):
 
 
 class AdminRemoveFromQueueView(APIView):
+    """Manual removal is disabled — students leave after desk approval/rejection."""
+
     permission_classes = [IsQueueAdmin]
 
-    @transaction.atomic
     def post(self, request):
-        serializer = QueueEntryIdSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        entry_id = serializer.validated_data.get("queue_entry_id")
-        if not entry_id:
-            return Response(
-                {"detail": "queue_entry_id is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        entry = QueueEntry.objects.filter(id=entry_id).select_related("student").first()
-        if not entry:
-            return Response(
-                {"detail": "Queue entry not found."}, status=status.HTTP_404_NOT_FOUND
-            )
-        if entry.status in (
-            QueueEntry.Status.APPROVED,
-            QueueEntry.Status.REJECTED,
-        ):
-            return Response(
-                {"detail": "Finalised entries cannot be removed."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        reg = entry.student.registration_number
-        remove_queue_entry(entry)
         return Response(
             {
-                "message": f"Removed {reg} from the queue.",
-                "removed": True,
-            }
+                "detail": (
+                    "Invigilators cannot delete students from the queue. "
+                    "A student is removed automatically after you approve or reject "
+                    "them with their secret code."
+                )
+            },
+            status=status.HTTP_403_FORBIDDEN,
         )
 
 
