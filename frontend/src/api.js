@@ -72,7 +72,19 @@ async function refreshAccessToken() {
 
 function errorFromPayload(data, fallback = 'Request failed') {
   if (data == null) return fallback;
-  if (typeof data === 'string') return data.trim() || fallback;
+  if (typeof data === 'string') {
+    const text = data.trim();
+    // Never surface Vercel's raw deployment 404 page to the UI
+    if (/NOT_FOUND/i.test(text) || /Code:\s*NOT_FOUND/i.test(text)) {
+      return 'Service endpoint not found. Please try again or refresh the page.';
+    }
+    return text || fallback;
+  }
+
+  const vercelCode = data?.error?.code || data?.code;
+  if (vercelCode === 'NOT_FOUND' || data?.error === 'NOT_FOUND') {
+    return 'Service endpoint not found. Please try again or refresh the page.';
+  }
 
   const detail = data.detail;
   if (detail != null) {
@@ -84,7 +96,11 @@ function errorFromPayload(data, fallback = 'Request failed') {
         return fallback;
       }
     }
-    return String(detail);
+    const detailText = String(detail);
+    if (/NOT_FOUND/i.test(detailText)) {
+      return 'Service endpoint not found. Please try again or refresh the page.';
+    }
+    return detailText;
   }
 
   const loc = data.location;
@@ -97,7 +113,13 @@ function errorFromPayload(data, fallback = 'Request failed') {
         .flat()
         .filter((v) => v != null && v !== '')
         .map(String);
-      if (parts.length) return parts.join(' ');
+      if (parts.length) {
+        const joined = parts.join(' ');
+        if (/NOT_FOUND/i.test(joined)) {
+          return 'Service endpoint not found. Please try again or refresh the page.';
+        }
+        return joined;
+      }
     } catch {
       return fallback;
     }
