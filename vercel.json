@@ -1,13 +1,14 @@
 {
-  "buildCommand": "cd frontend && npm install && npm run build",
+  "installCommand": "cd frontend && npm install",
+  "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://kabque.onrender.com/api/:path*"
+      "source": "/api/(.*)",
+      "destination": "https://kabque.onrender.com/api/$1"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
