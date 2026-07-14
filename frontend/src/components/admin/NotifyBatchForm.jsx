@@ -76,6 +76,10 @@ export default function NotifyBatchForm({
             <option value="sms">SMS only</option>
           </select>
         </label>
+        <p className="hint">
+          SMS needs: (1) MYSMSGATE_API_KEY on Render, (2) MySMSGate Android app online
+          on the same account, (3) student phone with country code like +2567…
+        </p>
 
         <Alert>{error}</Alert>
         <Alert variant="info">{!error ? message : ''}</Alert>

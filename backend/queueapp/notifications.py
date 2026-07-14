@@ -139,10 +139,57 @@ def send_email_notification(to_email: str, subject: str, body: str) -> tuple[boo
         return False, str(exc)
 
 
+def _parse_mysmsgate_error(raw: str, fallback: str = "MySMSGate request failed") -> str:
+    text = (raw or "").strip()
+    if not text:
+        return fallback
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return text[:400]
+    if isinstance(parsed, dict):
+        for key in ("message", "error", "detail", "reason"):
+            val = parsed.get(key)
+            if val:
+                return str(val)
+        return str(parsed)[:400]
+    return str(parsed)[:400]
+
+
+def _mysmsgate_hint(status_code: int, detail: str) -> str:
+    lower = (detail or "").lower()
+    if status_code in (401, 403) or "unauthorized" in lower or "invalid api" in lower:
+        return (
+            "MySMSGate rejected the API key. Put the same API key from the MySMSGate "
+            "dashboard into Render as MYSMSGATE_API_KEY, then redeploy."
+        )
+    if (
+        status_code in (404, 409, 422, 503)
+        or "no device" in lower
+        or "offline" in lower
+        or "not connected" in lower
+        or "no online" in lower
+    ):
+        return (
+            "No online Android device for this MySMSGate account. Open the MySMSGate "
+            "app on your phone, sign in with the same account as the API key, and keep "
+            "the phone online."
+        )
+    if "phone" in lower or "number" in lower or "invalid to" in lower:
+        return (
+            "Recipient phone was rejected. Student numbers must look like +2567XXXXXXX "
+            "(country code included)."
+        )
+    return detail or "MySMSGate could not send the SMS."
+
+
 def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
     if not api_key:
-        return False, "MYSMSGATE_API_KEY not configured"
+        return False, (
+            "MYSMSGATE_API_KEY is not set on the server. Add it in Render Environment "
+            "(from your MySMSGate dashboard), then redeploy."
+        )
 
     if not to_phone.startswith("+"):
         return False, f"Phone must start with country code (+…), got: {to_phone}"
@@ -151,54 +198,73 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         getattr(settings, "MYSMSGATE_API_URL", "") or "https://mysmsgate.net/api/v1/send"
     ).strip()
 
-    payload = {
+    base_payload = {
         "to": to_phone,
         "message": message[:1000],
     }
     device_id = (getattr(settings, "MYSMSGATE_DEVICE_ID", "") or "").strip()
-    if device_id:
-        payload["device_id"] = device_id
-
     sim_slot = getattr(settings, "MYSMSGATE_SIM_SLOT", None)
-    if sim_slot is not None and str(sim_slot).strip() != "":
-        try:
-            payload["slot"] = int(sim_slot)
-        except (TypeError, ValueError):
-            pass
 
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint,
-        data=data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            # MySMSGate accepts with HTTP 202 Accepted
-            raw = resp.read().decode("utf-8", errors="replace")
-            logger.info("MySMSGate accepted SMS to %s (HTTP %s)", to_phone, resp.status)
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                    if parsed.get("success") is False:
-                        return False, str(parsed.get("message") or parsed)
-                except json.JSONDecodeError:
-                    pass
-        return True, ""
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        logger.error(
-            "MySMSGate SMS failed to %s (%s): %s", to_phone, exc.code, detail
+    attempts = []
+    if device_id:
+        attempts.append({"device_id": device_id})
+    # Always try without a pinned device (uses first online device on the account)
+    attempts.append({})
+
+    last_error = "MySMSGate SMS failed"
+    for extra in attempts:
+        payload = {**base_payload, **extra}
+        if sim_slot is not None and str(sim_slot).strip() != "":
+            try:
+                slot = int(sim_slot)
+                payload["slot"] = slot
+            except (TypeError, ValueError):
+                pass
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
         )
-        return False, f"MySMSGate HTTP {exc.code}: {detail}"
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("MySMSGate SMS failed to %s", to_phone)
-        return False, str(exc)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                logger.info(
+                    "MySMSGate accepted SMS to %s (HTTP %s)", to_phone, resp.status
+                )
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                        if parsed.get("success") is False:
+                            last_error = _mysmsgate_hint(
+                                resp.status,
+                                _parse_mysmsgate_error(raw),
+                            )
+                            continue
+                    except json.JSONDecodeError:
+                        pass
+            return True, ""
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            parsed_detail = _parse_mysmsgate_error(detail, detail)
+            last_error = _mysmsgate_hint(exc.code, parsed_detail)
+            logger.error(
+                "MySMSGate SMS failed to %s (%s): %s", to_phone, exc.code, detail
+            )
+            # Retry without device_id if pinned device failed
+            continue
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("MySMSGate SMS failed to %s", to_phone)
+            last_error = str(exc)
+            continue
+
+    return False, last_error
 
 
 def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
@@ -244,6 +310,7 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
             logger.exception("SMS send failed")
             return False, str(exc)
 
-    logger.info("SMS (console) to %s:\n%s", to_phone, body)
-    print(f"\n=== KabQue SMS -> {to_phone} ===\n{body}\n============================\n")
-    return True, "logged_to_console"
+    return False, (
+        "SMS provider not configured. Set MYSMSGATE_API_KEY on Render "
+        "(MySMSGate dashboard → API key), keep the Android app online, then redeploy."
+    )

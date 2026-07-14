@@ -11,6 +11,11 @@ export default function BatchResultTable({ result }) {
   const students = result?.students || [];
   if (!result || !students.length) return null;
 
+  const smsFailed = Number(result.sms_failed || 0) > 0;
+  const smsHint =
+    (Array.isArray(result.sms_errors) && result.sms_errors[0]) ||
+    'Keep the MySMSGate Android app online with the same account as the API key on Render. Student phones must include country code (+256…).';
+
   return (
     <Panel title="Last batch notified">
       <Alert variant="info">{result.message || ''}</Alert>
@@ -18,6 +23,11 @@ export default function BatchResultTable({ result }) {
         <Alert>
           Requested {result.requested}, but only {result.available} were waiting —
           all remaining waiters were notified.
+        </Alert>
+      ) : null}
+      {smsFailed ? (
+        <Alert>
+          SMS did not send for {result.sms_failed} student(s). {smsHint}
         </Alert>
       ) : null}
       <div className="batch-summary">
@@ -29,6 +39,12 @@ export default function BatchResultTable({ result }) {
         </span>
         <span>
           SMS <strong>{result.sms_sent ?? '—'}</strong>
+          {smsFailed ? (
+            <>
+              {' '}
+              · failed <strong>{result.sms_failed}</strong>
+            </>
+          ) : null}
         </span>
         <span>
           Remaining <strong>{result.remaining ?? '—'}</strong>

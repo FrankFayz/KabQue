@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, get_user_model
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, F, Q
 from django.utils import timezone
@@ -674,6 +675,7 @@ class NotifyBatchView(APIView):
         email_fail = 0
         sms_ok = 0
         sms_fail = 0
+        sms_errors = []
         now = timezone.now()
         for batch_number, entry in enumerate(entries, start=1):
             code = entry.assign_secret_code()
@@ -735,6 +737,8 @@ class NotifyBatchView(APIView):
                     sms_ok += 1
                 else:
                     sms_fail += 1
+                    if err and err not in sms_errors:
+                        sms_errors.append(err)
                 NotificationLog.objects.create(
                     batch=batch,
                     queue_entry=entry,
@@ -781,7 +785,11 @@ class NotifyBatchView(APIView):
         if channel in ("sms", "both"):
             message += f" SMS sent: {sms_ok}."
             if sms_fail:
-                message += f" SMS failures: {sms_fail} (check phone format / MySMSGate device online)."
+                hint = sms_errors[0] if sms_errors else (
+                    "Check student phone (+country code) and that the MySMSGate "
+                    "Android app is online with the same account as MYSMSGATE_API_KEY on Render."
+                )
+                message += f" SMS failures: {sms_fail}. Reason: {hint}"
 
         return Response(
             {
@@ -794,6 +802,10 @@ class NotifyBatchView(APIView):
                 "emails_failed": email_fail,
                 "sms_sent": sms_ok,
                 "sms_failed": sms_fail,
+                "sms_errors": sms_errors,
+                "sms_configured": bool(
+                    (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
+                ),
                 "shortage": shortage,
                 "remaining": remaining,
                 "students": results,
