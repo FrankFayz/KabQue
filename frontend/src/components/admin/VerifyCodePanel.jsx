@@ -1,3 +1,4 @@
+import StatusPill from '../ui/StatusPill';
 import Panel from '../ui/Panel';
 
 export default function VerifyCodePanel({
@@ -7,37 +8,90 @@ export default function VerifyCodePanel({
   onSecretCodeChange,
   onVerify,
   onComplete,
+  onClear,
 }) {
+  const entry = verified?.entry;
+  const student = entry?.student;
+
   return (
-    <Panel title="Verify secret code">
+    <Panel title="Confirm identity" className="verify-panel">
       <form onSubmit={onVerify} className="stack-form">
-        <p className="muted">Student presents the code from their notification.</p>
+        <p className="muted">
+          Enter the secret code from the fresher’s email or SMS. A valid code checks them
+          in and shows their assigned day.
+        </p>
         <label>
           Secret code
           <input
             value={secretCode}
             onChange={(e) => onSecretCodeChange(e.target.value.toUpperCase())}
             placeholder="ABCD1234"
+            autoComplete="off"
+            spellCheck={false}
             required
           />
         </label>
-        <button className="btn btn-primary" disabled={busy}>
-          Confirm identity
+        <button className="btn btn-primary" disabled={busy || !secretCode.trim()}>
+          {busy ? 'Checking…' : 'Confirm identity'}
         </button>
       </form>
 
-      {verified?.entry && (
-        <div className="verify-card">
-          <p>
-            <strong>{verified.entry.student.full_name}</strong>
-          </p>
-          <p className="muted">
-            {verified.entry.student.registration_number} · Position #
-            {verified.entry.position}
-          </p>
-          <p className="muted">
-            {verified.entry.student.faculty} · {verified.entry.student.programme}
-          </p>
+      {entry && student ? (
+        <div className="verify-result">
+          <div className="verify-result-top">
+            <div>
+              <p className="verify-result-kicker">Fresher confirmed</p>
+              <h3>{student.full_name || '—'}</h3>
+              <p className="muted">{student.registration_number || '—'}</p>
+            </div>
+            <StatusPill status={entry.status} />
+          </div>
+
+          <div
+            className={`verify-schedule${
+              verified.schedule_is_today ? ' is-today' : ' is-other'
+            }`}
+          >
+            <span className="label">Scheduled day</span>
+            <strong>{entry.scheduled_date || 'Not assigned'}</strong>
+            <p>{verified.schedule_note}</p>
+          </div>
+
+          <div className="verify-grid">
+            <div>
+              <span className="label">Queue position</span>
+              <strong>#{entry.position}</strong>
+            </div>
+            <div>
+              <span className="label">Faculty</span>
+              <strong>{student.faculty || '—'}</strong>
+            </div>
+            <div>
+              <span className="label">Programme</span>
+              <strong>{student.programme || '—'}</strong>
+            </div>
+            <div>
+              <span className="label">Email</span>
+              <strong>{student.email || '—'}</strong>
+            </div>
+            <div>
+              <span className="label">Telephone</span>
+              <strong>{student.phone || '—'}</strong>
+            </div>
+            <div>
+              <span className="label">Secret code</span>
+              <strong>
+                <code>{entry.secret_code || secretCode}</code>
+              </strong>
+            </div>
+          </div>
+
+          {verified.newly_checked_in ? (
+            <p className="verify-chip ok">Checked in · dashboard count updated</p>
+          ) : (
+            <p className="verify-chip">Already checked in</p>
+          )}
+
           <div className="cta-row">
             <button
               type="button"
@@ -45,7 +99,7 @@ export default function VerifyCodePanel({
               onClick={() => onComplete('approved')}
               disabled={busy}
             >
-              Approve docs
+              Approve
             </button>
             <button
               type="button"
@@ -63,9 +117,12 @@ export default function VerifyCodePanel({
             >
               No-show
             </button>
+            <button type="button" className="btn btn-ghost" onClick={onClear} disabled={busy}>
+              Clear
+            </button>
           </div>
         </div>
-      )}
+      ) : null}
     </Panel>
   );
 }

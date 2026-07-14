@@ -893,6 +893,90 @@ textarea:focus {
   border-left: 3px solid var(--kab-yellow);
 }
 
+.verify-result {
+  margin-top: 1rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fbff, #fff);
+  display: grid;
+  gap: 0.9rem;
+}
+
+.verify-result-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.verify-result-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kab-green);
+}
+
+.verify-result h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  color: var(--kab-blue-ink);
+}
+
+.verify-schedule {
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+
+.verify-schedule.is-today {
+  border-color: rgba(14, 140, 69, 0.35);
+  background: #eef9f2;
+}
+
+.verify-schedule.is-other {
+  border-color: rgba(217, 119, 6, 0.35);
+  background: #fff7ed;
+}
+
+.verify-schedule p {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.verify-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.verify-grid strong {
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.verify-chip {
+  margin: 0;
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(0, 114, 187, 0.08);
+  color: var(--kab-blue-ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.verify-chip.ok {
+  background: rgba(14, 140, 69, 0.12);
+  color: var(--kab-green-deep);
+}
+
 .secret-box {
   margin-top: 0.5rem;
   padding: 1rem 1.1rem;

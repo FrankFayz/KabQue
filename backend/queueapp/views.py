@@ -757,6 +757,8 @@ class NotifyBatchView(APIView):
 
 
 class VerifyCodeView(APIView):
+    """Confirm fresher identity from notification secret code and check them in."""
+
     permission_classes = [IsQueueAdmin]
 
     def post(self, request):
@@ -767,56 +769,171 @@ class VerifyCodeView(APIView):
         entry = (
             QueueEntry.objects.select_related("student", "student__user")
             .filter(secret_code__iexact=code)
-            .exclude(
-                status__in=[
-                    QueueEntry.Status.APPROVED,
-                    QueueEntry.Status.REJECTED,
-                    QueueEntry.Status.WAITING,
-                ]
-            )
             .first()
         )
-        if not entry:
+        if not entry or not entry.secret_code:
             return Response(
-                {"detail": "Invalid or unused secret code."},
+                {
+                    "detail": "Invalid secret code. No fresher matched.",
+                    "valid": False,
+                },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        if entry.status == QueueEntry.Status.WAITING:
+            return Response(
+                {
+                    "detail": "This student has not been notified yet.",
+                    "valid": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if entry.status in (
+            QueueEntry.Status.APPROVED,
+            QueueEntry.Status.REJECTED,
+        ):
+            return Response(
+                {
+                    "detail": f"This visit is already marked as {entry.status}.",
+                    "valid": False,
+                    "entry": AdminQueueEntrySerializer(entry).data,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        newly_checked_in = False
         if entry.status == QueueEntry.Status.NOTIFIED:
             entry.status = QueueEntry.Status.CHECKED_IN
             entry.checked_in_at = timezone.now()
             entry.save(update_fields=["status", "checked_in_at", "updated_at"])
+            newly_checked_in = True
+        elif entry.status == QueueEntry.Status.SKIPPED:
+            # Allow re-check-in after a previous no-show / return visit with same code
+            entry.status = QueueEntry.Status.CHECKED_IN
+            entry.checked_in_at = timezone.now()
+            entry.save(update_fields=["status", "checked_in_at", "updated_at"])
+            newly_checked_in = True
+
+        today = timezone.localdate()
+        scheduled = entry.scheduled_date
+        schedule_is_today = bool(scheduled and scheduled == today)
+        if not scheduled:
+            schedule_note = "No approval day is assigned on this record."
+        elif schedule_is_today:
+            schedule_note = "Confirmed: this fresher is scheduled for today."
+        else:
+            schedule_note = (
+                f"Scheduled day is {scheduled.isoformat()}, not today ({today.isoformat()})."
+            )
+
+        counts = QueueEntry.objects.aggregate(
+            total=Count("id"),
+            waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
+            notified=Count("id", filter=Q(status=QueueEntry.Status.NOTIFIED)),
+            checked_in=Count("id", filter=Q(status=QueueEntry.Status.CHECKED_IN)),
+            approved=Count("id", filter=Q(status=QueueEntry.Status.APPROVED)),
+            rejected=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
+            skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
+        )
+        counts["remaining"] = counts["waiting"] or 0
+
+        message = (
+            "Identity confirmed and checked in."
+            if newly_checked_in
+            else "Identity confirmed (already checked in)."
+        )
 
         return Response(
             {
-                "message": "Student identity confirmed. Proceed with document verification.",
+                "valid": True,
+                "message": message,
+                "newly_checked_in": newly_checked_in,
+                "schedule_is_today": schedule_is_today,
+                "schedule_note": schedule_note,
+                "today": today.isoformat(),
                 "entry": AdminQueueEntrySerializer(entry).data,
+                "counts": counts,
             }
         )
 
 
 class CompleteVerificationView(APIView):
+    """Approve / reject / mark no-show after identity confirmation."""
+
     permission_classes = [IsQueueAdmin]
 
     def post(self, request):
         serializer = CompleteVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        entry = QueueEntry.objects.filter(
-            id=serializer.validated_data["queue_entry_id"]
-        ).first()
+        entry = (
+            QueueEntry.objects.select_related("student", "student__user")
+            .filter(id=serializer.validated_data["queue_entry_id"])
+            .first()
+        )
         if not entry:
             return Response(
                 {"detail": "Queue entry not found."}, status=status.HTTP_404_NOT_FOUND
             )
 
+        if entry.status in (
+            QueueEntry.Status.APPROVED,
+            QueueEntry.Status.REJECTED,
+        ):
+            return Response(
+                {"detail": f"Already finalized as {entry.status}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         decision = serializer.validated_data["decision"]
+        # Ensure they were at least checked in before approve/reject
+        if (
+            decision in ("approved", "rejected")
+            and entry.status not in (
+                QueueEntry.Status.CHECKED_IN,
+                QueueEntry.Status.NOTIFIED,
+            )
+        ):
+            return Response(
+                {
+                    "detail": "Confirm identity with the secret code before approving or rejecting."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         entry.status = decision
         entry.verified_at = timezone.now()
         entry.verification_notes = serializer.validated_data.get("notes", "")
+        if decision == "skipped" and not entry.checked_in_at:
+            # no-show without desk check-in
+            pass
         entry.save(
             update_fields=["status", "verified_at", "verification_notes", "updated_at"]
         )
-        return Response({"entry": AdminQueueEntrySerializer(entry).data})
+
+        counts = QueueEntry.objects.aggregate(
+            total=Count("id"),
+            waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
+            notified=Count("id", filter=Q(status=QueueEntry.Status.NOTIFIED)),
+            checked_in=Count("id", filter=Q(status=QueueEntry.Status.CHECKED_IN)),
+            approved=Count("id", filter=Q(status=QueueEntry.Status.APPROVED)),
+            rejected=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
+            skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
+        )
+        counts["remaining"] = counts["waiting"] or 0
+
+        labels = {
+            "approved": "Approved — documents accepted.",
+            "rejected": "Rejected — documents not accepted.",
+            "skipped": "Marked as no-show.",
+        }
+        return Response(
+            {
+                "message": labels.get(decision, f"Marked as {decision}."),
+                "entry": AdminQueueEntrySerializer(entry).data,
+                "counts": counts,
+            }
+        )
 
 
 class AdminRescheduleView(APIView):

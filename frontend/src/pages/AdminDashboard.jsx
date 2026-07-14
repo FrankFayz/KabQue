@@ -94,16 +94,20 @@ export default function AdminDashboard() {
     e.preventDefault();
     setBusy(true);
     setError('');
+    setMessage('');
     try {
       const data = await api('/admin/verify-code/', {
         method: 'POST',
-        body: { secret_code: secretCode },
+        body: { secret_code: secretCode.trim().toUpperCase() },
       });
       setVerified(data);
-      setMessage(data.message);
+      setMessage(data.message || 'Identity confirmed.');
+      if (data.counts) {
+        setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
+      }
       await load();
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Invalid secret code.');
       setVerified(null);
     } finally {
       setBusy(false);
@@ -115,7 +119,7 @@ export default function AdminDashboard() {
     setBusy(true);
     setError('');
     try {
-      await api('/admin/complete-verification/', {
+      const data = await api('/admin/complete-verification/', {
         method: 'POST',
         body: {
           queue_entry_id: verified.entry.id,
@@ -123,7 +127,10 @@ export default function AdminDashboard() {
           notes: '',
         },
       });
-      setMessage(`Marked as ${decision}.`);
+      setMessage(data.message || `Marked as ${decision}.`);
+      if (data.counts) {
+        setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
+      }
       setVerified(null);
       setSecretCode('');
       await load();
@@ -221,6 +228,11 @@ export default function AdminDashboard() {
           onSecretCodeChange={setSecretCode}
           onVerify={verifyCode}
           onComplete={complete}
+          onClear={() => {
+            setVerified(null);
+            setSecretCode('');
+            setMessage('');
+          }}
         />
       </div>
 
