@@ -7,6 +7,7 @@ export default function NotifyBatchForm({
   channel,
   busy,
   remaining = 0,
+  leftovers = 0,
   error,
   message,
   onBatchSizeChange,
@@ -14,16 +15,26 @@ export default function NotifyBatchForm({
   onChannelChange,
   onSubmit,
 }) {
+  const waiting = Number(remaining) || 0;
+  const carry = Number(leftovers) || 0;
+  const pool = waiting + carry;
   const requested = Number(batchSize) || 0;
-  const overRequest = remaining > 0 && requested > remaining;
-  const noneWaiting = remaining === 0;
+  const overRequest = pool > 0 && requested > pool;
+  const noneAvailable = pool === 0;
 
   return (
     <Panel title="Notify next batch">
       <form onSubmit={onSubmit} className="stack-form">
         <div className="notify-remaining-banner">
-          <span className="label">Remaining to notify</span>
-          <strong>{remaining}</strong>
+          <span className="label">Available to schedule</span>
+          <strong>{pool}</strong>
+          <span className="notify-pool-breakdown">
+            {carry > 0 ? `${carry} still in batch table` : null}
+            {carry > 0 && waiting > 0 ? ' · ' : null}
+            {waiting > 0 || carry === 0
+              ? `${waiting} waiting joiner${waiting === 1 ? '' : 's'}`
+              : null}
+          </span>
         </div>
 
         <label>
@@ -39,17 +50,27 @@ export default function NotifyBatchForm({
           />
         </label>
         <p className="hint">
-          The first N students by arrival order get queue numbers 1–N for that
-          approval day, then receive their secret code.
+          Size N fills first with students still in a prior batch table (not yet
+          approved), then with waiting joiners in arrival order. Everyone gets
+          fresh queue numbers 1–N for that approval day — including carry-overs.
         </p>
 
-        {noneWaiting ? (
-          <p className="notify-warn">No students are waiting. Joiners appear here when they enter the queue.</p>
+        {noneAvailable ? (
+          <p className="notify-warn">
+            Nothing to notify. Waiting queue is empty and no unapproved students
+            remain in a batch table.
+          </p>
+        ) : null}
+        {!noneAvailable && waiting === 0 && carry > 0 ? (
+          <p className="notify-warn notify-warn-info">
+            No new waiting joiners — the next batch will include the {carry}{' '}
+            student{carry === 1 ? '' : 's'} still in a batch table.
+          </p>
         ) : null}
         {overRequest ? (
           <p className="notify-warn">
-            Only {remaining} student{remaining === 1 ? '' : 's'} remaining. The
-            system will notify all {remaining} in first-come order.
+            Only {pool} student{pool === 1 ? '' : 's'} available. The system
+            will notify all {pool} (carry-overs first, then waiting).
           </p>
         ) : null}
 
@@ -76,15 +97,11 @@ export default function NotifyBatchForm({
             <option value="sms">SMS only</option>
           </select>
         </label>
-        <p className="hint">
-          SMS uses the student profile phone (+256…). Server needs a valid
-          MYSMSGATE_API_KEY on Render; keep the MySMSGate app online.
-        </p>
 
         <Alert>{error}</Alert>
         <Alert variant="info">{!error ? message : ''}</Alert>
 
-        <button className="btn btn-primary" disabled={busy || noneWaiting}>
+        <button className="btn btn-primary" disabled={busy || noneAvailable}>
           {busy ? 'Sending…' : 'Send notifications'}
         </button>
       </form>

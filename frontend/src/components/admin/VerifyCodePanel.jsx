@@ -66,7 +66,9 @@ export default function VerifyCodePanel({
             <div>
               <span className="label">Queue number</span>
               <strong>
-                {entry.position != null && entry.status !== 'waiting'
+                {entry.position != null &&
+                entry.status !== 'waiting' &&
+                Number(entry.position) > 0
                   ? `#${entry.position}`
                   : 'Not assigned yet'}
               </strong>

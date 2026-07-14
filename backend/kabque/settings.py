@@ -160,10 +160,18 @@ EMAIL_BACKEND = os.getenv(
 )
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "KabQue <noreply@kabale.ac.ug>")
 
+
+def _clean_env(value: str) -> str:
+    text = (value or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        text = text[1:-1].strip()
+    return text
+
+
 # Brevo (Sendinblue) transactional email — used when BREVO_API_KEY is set
-BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
-BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "")
-BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "KabQue")
+BREVO_API_KEY = _clean_env(os.getenv("BREVO_API_KEY", ""))
+BREVO_SENDER_EMAIL = _clean_env(os.getenv("BREVO_SENDER_EMAIL", ""))
+BREVO_SENDER_NAME = _clean_env(os.getenv("BREVO_SENDER_NAME", "KabQue")) or "KabQue"
 
 CAMPUS_LATITUDE = float(os.getenv("CAMPUS_LATITUDE", "1.373333"))
 CAMPUS_LONGITUDE = float(os.getenv("CAMPUS_LONGITUDE", "32.290275"))
@@ -172,13 +180,6 @@ GPS_ENFORCEMENT = os.getenv("GPS_ENFORCEMENT", "True").lower() in ("1", "true", 
 CAMPUS_NAME = os.getenv("CAMPUS_NAME", "Uganda (nationwide testing)")
 
 # MySMSGate — SMS via your connected Android phone
-def _clean_env(value: str) -> str:
-    text = (value or "").strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
-        text = text[1:-1].strip()
-    return text
-
-
 MYSMSGATE_API_KEY = _clean_env(os.getenv("MYSMSGATE_API_KEY", ""))
 MYSMSGATE_API_URL = _clean_env(
     os.getenv("MYSMSGATE_API_URL", "https://mysmsgate.net/api/v1/send")

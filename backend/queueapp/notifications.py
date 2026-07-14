@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 
 from .phones import normalize_phone
+from .auth_utils import normalize_email
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,8 @@ __all__ = [
     "build_approval_message",
     "build_approval_sms",
     "normalize_phone",
+    "resolve_student_contacts",
+    "deliver_student_notification",
     "send_email_notification",
     "send_sms_notification",
 ]
@@ -73,9 +76,32 @@ def _parse_from_email(value: str) -> tuple[str, str]:
 def _sender_identity() -> tuple[str, str]:
     name = (getattr(settings, "BREVO_SENDER_NAME", "") or "").strip() or "KabQue"
     email = (getattr(settings, "BREVO_SENDER_EMAIL", "") or "").strip()
-    if email:
+    if email and "@" in email:
         return name, email
     return _parse_from_email(settings.DEFAULT_FROM_EMAIL)
+
+
+def _parse_brevo_error(raw: str, status_code: int = 0) -> str:
+    text = (raw or "").strip()
+    lower = text.lower()
+    if "sender" in lower and (
+        "not valid" in lower or "invalid" in lower or "not found" in lower
+    ):
+        return (
+            "Brevo rejected the sender email. Set BREVO_SENDER_EMAIL to a verified "
+            "sender in your Brevo account."
+        )
+    if status_code in (401, 403) or "unauthorized" in lower or "api-key" in lower:
+        return "Invalid Brevo API key"
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            msg = parsed.get("message") or parsed.get("error") or ""
+            if msg:
+                return str(msg)[:200]
+    except json.JSONDecodeError:
+        pass
+    return (text[:200] if text else f"Brevo HTTP {status_code}") or "Email send failed"
 
 
 def _send_via_brevo(to_email: str, subject: str, body: str) -> tuple[bool, str]:
@@ -89,7 +115,7 @@ def _send_via_brevo(to_email: str, subject: str, body: str) -> tuple[bool, str]:
 
     payload = {
         "sender": {"name": sender_name, "email": sender_email},
-        "to": [{"email": to_email.strip()}],
+        "to": [{"email": to_email.strip().lower()}],
         "subject": subject,
         "textContent": body,
     }
@@ -106,20 +132,33 @@ def _send_via_brevo(to_email: str, subject: str, body: str) -> tuple[bool, str]:
     )
     try:
         with urllib.request.urlopen(req, timeout=25) as resp:
-            resp.read()
+            raw = resp.read().decode("utf-8", errors="replace")
+            logger.info(
+                "Brevo accepted email to %s from %s (HTTP %s)",
+                to_email,
+                sender_email,
+                resp.status,
+            )
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    if parsed.get("messageId") or parsed.get("messageIds"):
+                        return True, ""
+                except json.JSONDecodeError:
+                    pass
         return True, ""
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         logger.error("Brevo email failed (%s): %s", exc.code, detail)
-        return False, f"Brevo HTTP {exc.code}: {detail}"
+        return False, _parse_brevo_error(detail, exc.code)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Brevo email failed")
-        return False, str(exc)
+        return False, str(exc)[:160]
 
 
 def send_email_notification(to_email: str, subject: str, body: str) -> tuple[bool, str]:
-    to_email = (to_email or "").strip()
-    if not to_email:
+    to_email = normalize_email(to_email or "")
+    if not to_email or "@" not in to_email:
         return False, "No email address on student profile"
 
     if (getattr(settings, "BREVO_API_KEY", "") or "").strip():
@@ -297,3 +336,88 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
             return False, str(exc)[:120]
 
     return False, "MySMSGate API key missing on server"
+
+
+def resolve_student_contacts(user) -> tuple[str, str]:
+    """
+    Email + phone the fresher saved on their profile (post-signup).
+    Always read the latest values from the user record.
+    """
+    email = normalize_email(getattr(user, "email", "") or "")
+    phone = normalize_phone(getattr(user, "phone", "") or "")
+    return email, phone
+
+
+def deliver_student_notification(
+    *,
+    user,
+    channel: str,
+    subject: str,
+    email_body: str,
+    sms_body: str,
+) -> list[dict]:
+    """
+    Send notice to the student's saved email and/or phone, according to the
+    supervisor channel choice: email | sms | both.
+    """
+    # Fresh contact details (profile completed / updated after signup)
+    try:
+        user.refresh_from_db(fields=["email", "phone"])
+    except Exception:  # noqa: BLE001
+        pass
+
+    email, phone = resolve_student_contacts(user)
+    channel = (channel or "both").strip().lower()
+    results: list[dict] = []
+
+    if channel in ("email", "both"):
+        if email:
+            ok, err = send_email_notification(email, subject, email_body)
+            results.append(
+                {
+                    "channel": "email",
+                    "destination": email,
+                    "success": ok,
+                    "error": err,
+                }
+            )
+            if ok:
+                logger.info("KabQue email delivered to %s", email)
+            else:
+                logger.warning("KabQue email failed to %s: %s", email, err)
+        else:
+            results.append(
+                {
+                    "channel": "email",
+                    "destination": "",
+                    "success": False,
+                    "error": "Student has no email on their profile",
+                }
+            )
+
+    if channel in ("sms", "both"):
+        if phone:
+            ok, err = send_sms_notification(phone, sms_body)
+            results.append(
+                {
+                    "channel": "sms",
+                    "destination": phone,
+                    "success": ok,
+                    "error": err,
+                }
+            )
+            if ok:
+                logger.info("KabQue SMS delivered to %s", phone)
+            else:
+                logger.warning("KabQue SMS failed to %s: %s", phone, err)
+        else:
+            results.append(
+                {
+                    "channel": "sms",
+                    "destination": "",
+                    "success": False,
+                    "error": "Student has no phone on their profile",
+                }
+            )
+
+    return results

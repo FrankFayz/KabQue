@@ -195,7 +195,7 @@ export default function CompleteProfileCard({ profile, onSaved }) {
               <p>Faculty and programme for queue analytics</p>
             </div>
           </div>
-          <div className="profile-setup-grid profile-setup-academic">
+          <div className="profile-setup-academic">
             <FacultyProgrammeFields
               faculty={form.faculty}
               programme={form.programme}

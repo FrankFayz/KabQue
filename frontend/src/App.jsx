@@ -34,9 +34,7 @@ function Protected({ children, role }) {
   }
 
   if (role === 'student') {
-    if (isMainAdmin(user)) {
-      return <Navigate to="/main-admin" replace />;
-    }
+    if (isMainAdmin(user)) return children;
     if (user.role === 'admin' || user.role === 'main_admin') {
       return <Navigate to="/admin" replace />;
     }

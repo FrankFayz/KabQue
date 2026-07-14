@@ -40,6 +40,16 @@ urlpatterns = [
         name="admin_reschedule",
     ),
     path(
+        "admin/batch-reschedule/",
+        views.AdminBatchRescheduleView.as_view(),
+        name="admin_batch_reschedule",
+    ),
+    path(
+        "admin/batch/active/",
+        views.AdminActiveBatchView.as_view(),
+        name="admin_batch_active",
+    ),
+    path(
         "admin/remove-from-queue/",
         views.AdminRemoveFromQueueView.as_view(),
         name="admin_remove_from_queue",
@@ -69,5 +79,15 @@ urlpatterns = [
         "main-admin/approve-supervisor/",
         views.MainAdminApproveSupervisorView.as_view(),
         name="main_admin_approve_supervisor",
+    ),
+    path(
+        "main-admin/lock-user/",
+        views.MainAdminLockUserView.as_view(),
+        name="main_admin_lock_user",
+    ),
+    path(
+        "main-admin/delete-user/",
+        views.MainAdminDeleteUserView.as_view(),
+        name="main_admin_delete_user",
     ),
 ]

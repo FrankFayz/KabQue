@@ -43,12 +43,27 @@ class User(AbstractUser):
         error_messages={"unique": "A user with that username already exists."},
     )
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.STUDENT)
-    phone = models.CharField(max_length=20, blank=True)
+    phone = models.CharField(max_length=20, blank=True, default="", db_index=True)
     # Supervisors (kab.ac.ug) must be approved by a Main Admin before desk access.
     is_approved = models.BooleanField(
         default=True,
         help_text="False until a Main Admin confirms Kabale staff membership.",
     )
+
+    class Meta(AbstractUser.Meta):
+        constraints = [
+            # One account per contact when set (blank allowed on many signup stubs)
+            models.UniqueConstraint(
+                fields=["email"],
+                condition=~models.Q(email=""),
+                name="uniq_user_email_when_set",
+            ),
+            models.UniqueConstraint(
+                fields=["phone"],
+                condition=~models.Q(phone=""),
+                name="uniq_user_phone_when_set",
+            ),
+        ]
 
     @property
     def is_main_admin(self) -> bool:

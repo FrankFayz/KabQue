@@ -1,17 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import StatusPill from '../ui/StatusPill';
 import SecretCodeCard from './SecretCodeCard';
 import Alert from '../ui/Alert';
 
-function tomorrowISO() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-function canManageAssignment(queue) {
+function canReturnToWaiting(queue) {
   if (!queue) return false;
-  if (['approved', 'rejected'].includes(queue.status)) return false;
+  if (['approved', 'rejected', 'waiting'].includes(queue.status)) return false;
   return (
     Boolean(queue.scheduled_date) ||
     ['notified', 'checked_in', 'skipped'].includes(queue.status)
@@ -19,27 +13,25 @@ function canManageAssignment(queue) {
 }
 
 export default function QueueStatusBoard({ queue, busy = false, onReschedule, onLeave }) {
-  const [date, setDate] = useState(() => queue?.scheduled_date || tomorrowISO());
   const [localError, setLocalError] = useState('');
-  const manage = canManageAssignment(queue);
+  const canDefer = canReturnToWaiting(queue);
   const hasBatchNumber =
-    queue?.has_batch_number === true ||
-    (queue?.position != null && queue?.status !== 'waiting');
-
-  useEffect(() => {
-    setDate(queue?.scheduled_date || tomorrowISO());
-  }, [queue?.scheduled_date, queue?.id]);
+    queue?.status !== 'waiting' &&
+    queue?.position != null &&
+    Number(queue.position) > 0;
 
   if (!queue) return null;
 
-  async function handleReschedule() {
+  async function handleReturnToWaiting() {
     setLocalError('');
-    if (!date) {
-      setLocalError('Choose a new date.');
-      return;
-    }
+    const ok = window.confirm(
+      'Cannot attend this approval day?\n\n' +
+        'You will return to the waiting queue. You cannot choose a new date — ' +
+        'wait until the supervisor notifies the next schedule.'
+    );
+    if (!ok) return;
     try {
-      await onReschedule?.(date);
+      await onReschedule?.();
     } catch (err) {
       setLocalError(err.message);
     }
@@ -48,7 +40,7 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
   async function handleLeave() {
     setLocalError('');
     const ok = window.confirm(
-      'Leave the queue and cancel this assignment? You can join again later from campus.'
+      'Leave the queue completely? You can join again later from campus.'
     );
     if (!ok) return;
     try {
@@ -107,28 +99,22 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
 
       <div className="queue-manage">
         <Alert>{localError}</Alert>
-        {manage && (
-          <div className="queue-manage-row">
-            <label className="queue-manage-date">
-              New date
-              <input
-                type="date"
-                value={date}
-                min={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setDate(e.target.value)}
-                disabled={busy}
-              />
-            </label>
+        {canDefer ? (
+          <div className="queue-defer">
+            <p className="queue-defer-copy">
+              Cannot make this approval day? Return to the waiting queue. KabQue
+              will not let you pick a date — wait for the next supervisor schedule.
+            </p>
             <button
               type="button"
-              className="btn btn-primary"
-              onClick={handleReschedule}
+              className="btn btn-secondary"
+              onClick={handleReturnToWaiting}
               disabled={busy}
             >
-              {busy ? 'Working…' : 'Reschedule'}
+              {busy ? 'Returning…' : 'Return to waiting queue'}
             </button>
           </div>
-        )}
+        ) : null}
         {!['approved', 'rejected'].includes(queue.status) && (
           <button
             type="button"

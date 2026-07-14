@@ -36,9 +36,6 @@ export default function NavBar() {
               <Link to="/main-admin" className="nav-link">
                 Main Admin
               </Link>
-              <Link to="/main-admin" className="nav-link">
-                Students
-              </Link>
               <Link to="/admin" className="nav-link">
                 Supervisors
               </Link>

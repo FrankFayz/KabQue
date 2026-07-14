@@ -1,12 +1,42 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, getStoredUser, setAuth } from '../api';
+import { isMainAdmin } from '../authRoles';
 import CompleteProfileCard from '../components/student/CompleteProfileCard';
 import JoinQueueCard from '../components/student/JoinQueueCard';
 import QueueStatusBoard from '../components/student/QueueStatusBoard';
 import Alert from '../components/ui/Alert';
 import PageHeader from '../components/ui/PageHeader';
 
-export default function StudentDashboard() {
+/** Same join-queue screen students use — shown when Main Admin opens Students. */
+function MainAdminStudentJoinView() {
+  const previewProfile = {
+    registration_number: 'STUDENT VIEW',
+    full_name: 'Fresher (preview)',
+    faculty: 'Sample faculty',
+    programme: 'Sample programme',
+    email: 'student@example.com',
+    phone: '',
+    profile_complete: true,
+  };
+
+  return (
+    <section className="dash">
+      <PageHeader
+        eyebrow="Student dashboard"
+        title="Join the queue"
+        action={
+          <Link to="/main-admin" className="btn btn-secondary">
+            Back to Main Admin
+          </Link>
+        }
+      />
+      <JoinQueueCard profile={previewProfile} />
+    </section>
+  );
+}
+
+function StudentDashboardLive() {
   const [user, setUser] = useState(() => getStoredUser());
   const [queue, setQueue] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -101,15 +131,18 @@ export default function StudentDashboard() {
     await load({ manual: true });
   }
 
-  async function handleReschedule(scheduledDate) {
+  async function handleReschedule() {
     setActionBusy(true);
     setError('');
     try {
       const data = await api('/student/reschedule/', {
         method: 'POST',
-        body: { scheduled_date: scheduledDate },
+        body: {},
       });
-      setInfo(data.message || 'Rescheduled.');
+      setInfo(
+        data.message ||
+          'Returned to the waiting queue. Wait for the next supervisor schedule.'
+      );
       if (data.queue) applyQueuePayload(data.queue);
       else await load({ manual: true });
     } catch (err) {
@@ -192,4 +225,11 @@ export default function StudentDashboard() {
       )}
     </section>
   );
+}
+
+export default function StudentDashboard() {
+  if (isMainAdmin(getStoredUser())) {
+    return <MainAdminStudentJoinView />;
+  }
+  return <StudentDashboardLive />;
 }

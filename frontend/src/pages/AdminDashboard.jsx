@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, getStoredUser } from '../api';
 import { isMainAdmin } from '../authRoles';
@@ -33,18 +33,71 @@ export default function AdminDashboard() {
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState('');
+  const [rescheduleMessage, setRescheduleMessage] = useState('');
   const [lastSynced, setLastSynced] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState('');
+  const loadSeq = useRef(0);
+  const statusRef = useRef(status);
+  const searchRef = useRef(search);
+  const notifyResultRef = useRef(notifyResult);
+  statusRef.current = status;
+  searchRef.current = search;
+  notifyResultRef.current = notifyResult;
 
-  const load = useCallback(async () => {
+  const loadBatch = useCallback(async (batchId) => {
+    try {
+      const qs = batchId
+        ? `?batch_id=${batchId}&_=${Date.now()}`
+        : `?_=${Date.now()}`;
+      const data = await api(`/admin/batch/active/${qs}`);
+      if (!data?.batch) return;
+      if (Array.isArray(data.students) && data.students.length > 0) {
+        setNotifyResult(data);
+        return;
+      }
+      // Empty remaining — keep panel so supervisor sees "all cleared"
+      setNotifyResult((prev) => {
+        if (prev?.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
+          return prev;
+        }
+        return {
+          ...data,
+          message:
+            data.message ||
+            'No students remain in this batch (approved students leave the table).',
+        };
+      });
+    } catch {
+      // Desk still works without the batch table panel
+    }
+  }, []);
+
+  const load = useCallback(async ({ manual = false } = {}) => {
+    const seq = ++loadSeq.current;
+    if (manual) {
+      setRefreshing(true);
+      setRefreshNote('');
+      setPageError('');
+    }
+
     try {
       const params = new URLSearchParams();
-      if (status) params.set('status', status);
-      if (search) params.set('search', search);
-      const bust = `_=${Date.now()}`;
+      const statusFilter = statusRef.current;
+      const searchFilter = searchRef.current;
+      if (statusFilter) params.set('status', statusFilter);
+      if (searchFilter) params.set('search', searchFilter);
+      params.set('_', String(Date.now()));
+
       const [d, q] = await Promise.all([
-        api(`/admin/dashboard/?${bust}`),
-        api(`/admin/queue/?${params.toString()}&${bust}`),
+        api(`/admin/dashboard/?${params.toString()}`),
+        api(`/admin/queue/?${params.toString()}`),
       ]);
+
+      if (seq !== loadSeq.current) return;
+
       setDash(d);
       setQueue(Array.isArray(q) ? q : []);
       setLastSynced(new Date());
@@ -59,14 +112,31 @@ export default function AdminDashboard() {
         return d?.campus?.default_daily_batch_size || 20;
       });
       setPageError('');
+      if (manual) {
+        const waiting = d?.counts?.waiting ?? d?.counts?.remaining ?? 0;
+        const total = d?.counts?.total ?? (Array.isArray(q) ? q.length : 0);
+        setRefreshNote(`Updated · ${total} in queue · ${waiting} waiting`);
+      }
+
+      const batchId = notifyResultRef.current?.batch?.id;
+      await loadBatch(batchId || undefined);
     } catch (err) {
-      setPageError(err.message);
+      if (seq !== loadSeq.current) return;
+      setPageError(err.message || 'Could not refresh desk data.');
+      if (manual) setRefreshNote('');
+    } finally {
+      if (manual && seq === loadSeq.current) {
+        setRefreshing(false);
+      }
     }
-  }, [status, search]);
+  }, [loadBatch]);
 
   useEffect(() => {
-    load();
-    const id = setInterval(load, 10000);
+    load({ manual: false });
+  }, [status, search, load]);
+
+  useEffect(() => {
+    const id = setInterval(() => load({ manual: false }), 10000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -85,7 +155,6 @@ export default function AdminDashboard() {
         },
       });
       setNotifyResult(data);
-      // Keep the notify form alert short; full batch details render below.
       if (data.sms_failed) {
         setNotifyMessage(
           `Batch sent. Emails ${data.emails_sent ?? 0}, SMS failed ${data.sms_failed}.`
@@ -100,7 +169,7 @@ export default function AdminDashboard() {
           `Only ${data.available} waiting (you asked for ${data.requested}); all remaining were notified.`
         );
       }
-      await load();
+      await load({ manual: false });
     } catch (err) {
       setNotifyError(err.message || 'Could not send notifications.');
     } finally {
@@ -124,7 +193,7 @@ export default function AdminDashboard() {
       if (data.counts) {
         setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
       }
-      await load();
+      await load({ manual: false });
     } catch (err) {
       const detail =
         err?.data?.detail ||
@@ -155,9 +224,30 @@ export default function AdminDashboard() {
       if (data.counts) {
         setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
       }
+      // Approved / rejected leave the batch result table immediately
+      if (data.batch) {
+        setNotifyResult(data.batch);
+      } else if (data.removed_queue_entry_id) {
+        setNotifyResult((prev) => {
+          if (!prev?.students?.length) return prev;
+          const nextStudents = prev.students.filter(
+            (s) => s.queue_entry_id !== data.removed_queue_entry_id
+          );
+          return {
+            ...prev,
+            students: nextStudents,
+            notified_count: nextStudents.length,
+            remaining_in_batch: nextStudents.length,
+            message:
+              decision === 'approved' || decision === 'rejected'
+                ? `Student ${decision}. Removed from batch table — ${nextStudents.length} remain for end-of-day reschedule.`
+                : prev.message,
+          };
+        });
+      }
       setVerified(null);
       setSecretCode('');
-      await load();
+      await load({ manual: false });
     } catch (err) {
       setVerifyError(err.message || 'Could not complete verification.');
     } finally {
@@ -178,11 +268,37 @@ export default function AdminDashboard() {
         },
       });
       setQueueMessage(data.message || 'Rescheduled.');
-      await load();
+      await load({ manual: false });
     } catch (err) {
       setQueueError(err.message);
     } finally {
       setQueueBusy(false);
+    }
+  }
+
+  async function batchReschedule({ batchId, count, scheduledDate }) {
+    setRescheduleBusy(true);
+    setRescheduleError('');
+    setRescheduleMessage('');
+    try {
+      const data = await api('/admin/batch-reschedule/', {
+        method: 'POST',
+        body: {
+          batch_id: batchId,
+          count: Number(count),
+          scheduled_date: scheduledDate,
+          channel,
+        },
+      });
+      setNotifyResult(data);
+      setRescheduleMessage(data.message || 'Batch rescheduled.');
+      await load({ manual: false });
+      return true;
+    } catch (err) {
+      setRescheduleError(err.message || 'Could not reschedule this batch.');
+      return false;
+    } finally {
+      setRescheduleBusy(false);
     }
   }
 
@@ -200,16 +316,19 @@ export default function AdminDashboard() {
             ) : null}
             {lastSynced && (
               <span className="dash-refreshed">
-                Live · {lastSynced.toLocaleTimeString()}
+                {refreshing
+                  ? 'Refreshing…'
+                  : `Live · ${lastSynced.toLocaleTimeString()}`}
               </span>
             )}
             <button
               type="button"
               className="btn btn-primary"
-              onClick={load}
-              disabled={notifyBusy || verifyBusy || queueBusy}
+              onClick={() => load({ manual: true })}
+              disabled={refreshing}
+              aria-busy={refreshing}
             >
-              Refresh
+              {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
         }
@@ -217,7 +336,9 @@ export default function AdminDashboard() {
 
       <Alert>{pageError}</Alert>
       <Alert>{queueError}</Alert>
-      <Alert variant="info">{!queueError ? queueMessage : ''}</Alert>
+      <Alert variant="info">
+        {!queueError ? queueMessage || refreshNote : ''}
+      </Alert>
       <AdminStats counts={dash?.counts} />
       <AnalyticsBreakdown
         byFaculty={dash?.by_faculty}
@@ -232,6 +353,7 @@ export default function AdminDashboard() {
           channel={channel}
           busy={notifyBusy}
           remaining={dash?.counts?.remaining ?? dash?.counts?.waiting ?? 0}
+          leftovers={dash?.counts?.batch_leftovers ?? 0}
           error={notifyError}
           message={notifyMessage}
           onBatchSizeChange={setBatchSize}
@@ -260,12 +382,18 @@ export default function AdminDashboard() {
         />
       </div>
 
-      <BatchResultTable result={notifyResult} />
+      <BatchResultTable
+        result={notifyResult}
+        onBatchReschedule={batchReschedule}
+        rescheduleBusy={rescheduleBusy}
+        rescheduleError={rescheduleError}
+        rescheduleMessage={rescheduleMessage}
+      />
       <QueueTable
         queue={queue}
         status={status}
         search={search}
-        busy={queueBusy}
+        busy={queueBusy || refreshing}
         onStatusChange={setStatus}
         onSearchChange={setSearch}
         onReschedule={rescheduleEntry}

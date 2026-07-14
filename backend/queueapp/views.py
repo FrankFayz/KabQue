@@ -12,9 +12,8 @@ from .models import CampusSettings, NotificationBatch, NotificationLog, QueueEnt
 from .notifications import (
     build_approval_message,
     build_approval_sms,
-    normalize_phone,
-    send_email_notification,
-    send_sms_notification,
+    deliver_student_notification,
+    resolve_student_contacts,
 )
 from .auth_utils import (
     is_kab_university_email,
@@ -30,11 +29,14 @@ from .serializers import (
     JoinQueueSerializer,
     LecturerRegisterSerializer,
     LoginSerializer,
+    MainAdminLockUserSerializer,
     MainAdminRegisterSerializer,
+    MainAdminUserIdSerializer,
     NotificationBatchSerializer,
     NotifyBatchSerializer,
     QueueEntryIdSerializer,
     QueueEntrySerializer,
+    BatchRescheduleSerializer,
     RescheduleSerializer,
     StudentProfileSerializer,
     StudentRegisterSerializer,
@@ -42,6 +44,25 @@ from .serializers import (
 )
 
 User = get_user_model()
+
+
+ACCOUNT_LOCKED_MESSAGE = (
+    "This account has been locked by a Main Admin. You cannot sign in."
+)
+
+
+def _reject_if_locked(user_obj, password):
+    """If password is correct but account is locked, return a Response; else None."""
+    if user_obj is None:
+        return None
+    if user_obj.is_active:
+        return None
+    if not user_obj.check_password(password):
+        return None
+    return Response(
+        {"detail": ACCOUNT_LOCKED_MESSAGE, "account_locked": True},
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 
 class IsQueueAdmin(permissions.BasePermission):
@@ -80,6 +101,7 @@ def tokens_for_user(user):
             "is_approved": user.is_approved,
             "is_main_admin": user.is_main_admin,
             "is_staff": user.is_staff,
+            "is_active": user.is_active,
             "full_name": user.get_full_name() or user.username,
         },
     }
@@ -109,6 +131,157 @@ def waiting_ahead_count(entry) -> int:
         created_at__lt=entry.created_at,
     ).count()
 
+
+def has_batch_queue_number(entry) -> bool:
+    """True only after supervisor notify assigns 1…N for that batch."""
+    if entry is None:
+        return False
+    if entry.status == QueueEntry.Status.WAITING:
+        return False
+    return entry.position is not None
+
+
+def clear_waiting_batch_numbers():
+    """Waiting students must not keep leftover batch numbers from prior bugs/deploys."""
+    QueueEntry.ensure_nullable_position()
+    QueueEntry.objects.filter(status=QueueEntry.Status.WAITING).exclude(
+        position=None
+    ).update(position=None)
+
+
+ACTIVE_BATCH_STATUSES = (
+    QueueEntry.Status.NOTIFIED,
+    QueueEntry.Status.CHECKED_IN,
+    QueueEntry.Status.SKIPPED,
+)
+
+
+def detach_entry_from_batches(entry):
+    """Drop batch-table links so finalized / deferred students leave the batch view."""
+    NotificationLog.ensure_nullable_queue_entry()
+    NotificationLog.objects.filter(queue_entry_id=entry.id).update(queue_entry=None)
+
+
+def detach_entries_from_batch(batch_id, entry_ids):
+    """Clear links on a source batch before moving students to a new day."""
+    if not entry_ids:
+        return
+    NotificationLog.ensure_nullable_queue_entry()
+    NotificationLog.objects.filter(
+        batch_id=batch_id, queue_entry_id__in=list(entry_ids)
+    ).update(queue_entry=None)
+
+
+def live_batch_entries(batch_id):
+    """
+    Students still linked to this batch and not yet approved/rejected.
+    Approved (or rejected) students leave the live queue and are detached from
+    batch logs — they must not appear in the batch result table.
+    """
+    logs = (
+        NotificationLog.objects.filter(batch_id=batch_id, queue_entry__isnull=False)
+        .select_related(
+            "queue_entry", "queue_entry__student", "queue_entry__student__user"
+        )
+        .order_by("queue_entry__position", "queue_entry__id", "id")
+    )
+    seen = set()
+    entries = []
+    for log in logs:
+        entry = log.queue_entry
+        if not entry or entry.id in seen:
+            continue
+        seen.add(entry.id)
+        if entry.status in ACTIVE_BATCH_STATUSES:
+            entries.append(entry)
+    return entries
+
+
+def recompact_batch_positions(batch_id):
+    """Keep contiguous #1…K on remaining (unapproved) students after others leave."""
+    QueueEntry.ensure_nullable_position()
+    for index, entry in enumerate(live_batch_entries(batch_id), start=1):
+        if entry.position != index:
+            entry.position = index
+            entry.save(update_fields=["position", "updated_at"])
+
+
+def collect_batch_leftovers(exclude_batch_ids=None):
+    """
+    Unapproved students still sitting in any open batch result table.
+    Ordered oldest batch first, then position — fair carry into the next schedule.
+    """
+    exclude = set(exclude_batch_ids or [])
+    seen = set()
+    leftovers = []
+    for batch in NotificationBatch.objects.order_by("created_at", "id"):
+        if batch.id in exclude:
+            continue
+        for entry in live_batch_entries(batch.id):
+            if entry.id in seen:
+                continue
+            seen.add(entry.id)
+            leftovers.append(entry)
+    return leftovers
+
+
+def serialize_batch_student(entry, *, channels=None):
+    profile_email, profile_phone = resolve_student_contacts(entry.student.user)
+    scheduled = entry.scheduled_date.isoformat() if entry.scheduled_date else None
+    return {
+        "queue_entry_id": entry.id,
+        "position": entry.position,
+        "registration_number": entry.student.registration_number,
+        "full_name": entry.student.full_name,
+        "email": profile_email,
+        "phone": profile_phone,
+        "secret_code": entry.secret_code or "",
+        "scheduled_date": scheduled,
+        "status": entry.status,
+        "channels": channels or [],
+    }
+
+
+def build_live_batch_payload(batch, *, message=None, rescheduled=False, extras=None):
+    students = [serialize_batch_student(e) for e in live_batch_entries(batch.id)]
+    remaining_waiting = QueueEntry.objects.filter(
+        status=QueueEntry.Status.WAITING
+    ).count()
+    payload = {
+        "batch": NotificationBatchSerializer(batch).data,
+        "message": message
+        or (
+            f"{len(students)} student{'s' if len(students) != 1 else ''} still in this "
+            f"batch (not yet approved). Approved students leave the result table; "
+            f"reschedule remaining ones onto a new day when ready."
+        ),
+        "requested": batch.batch_size,
+        "available": len(students),
+        "notified_count": len(students),
+        "emails_sent": 0,
+        "emails_failed": 0,
+        "sms_sent": 0,
+        "sms_failed": 0,
+        "sms_errors": [],
+        "shortage": False,
+        "remaining": remaining_waiting,
+        "students": students,
+        "rescheduled": rescheduled,
+        "remaining_in_batch": len(students),
+    }
+    if extras:
+        payload.update(extras)
+    return payload
+
+
+def batch_ids_for_entry(entry_id):
+    return list(
+        NotificationLog.objects.filter(queue_entry_id=entry_id)
+        .values_list("batch_id", flat=True)
+        .distinct()
+    )
+
+
 def can_reschedule_entry(entry) -> bool:
     if entry.status in (
         QueueEntry.Status.APPROVED,
@@ -123,7 +296,44 @@ def can_reschedule_entry(entry) -> bool:
     ) or bool(entry.scheduled_date)
 
 
-def apply_reschedule(entry, scheduled_date, *, notify=True):
+def return_student_to_waiting_queue(entry):
+    """
+    Student cannot attend their assigned day: clear the assignment and place them
+    at the back of the waiting queue. They do not choose a new date — they wait
+    until a supervisor notifies the next batch.
+    """
+    # Leave today's batch result table; they wait for a future notify, not this day
+    detach_entry_from_batches(entry)
+    QueueEntry.ensure_nullable_position()
+    entry.status = QueueEntry.Status.WAITING
+    entry.position = None
+    entry.secret_code = ""
+    entry.scheduled_date = None
+    entry.notified_at = None
+    entry.checked_in_at = None
+    entry.verified_at = None
+    entry.verification_notes = ""
+    # Re-join by current time so they wait behind current waiters (fair FCFS)
+    entry.created_at = timezone.now()
+    entry.save(
+        update_fields=[
+            "status",
+            "position",
+            "secret_code",
+            "scheduled_date",
+            "notified_at",
+            "checked_in_at",
+            "verified_at",
+            "verification_notes",
+            "created_at",
+            "updated_at",
+        ]
+    )
+    clear_waiting_batch_numbers()
+    return entry
+
+
+def apply_reschedule(entry, scheduled_date, *, notify=True, channel="both", position=None):
     code = entry.assign_secret_code()
     entry.status = QueueEntry.Status.NOTIFIED
     entry.scheduled_date = scheduled_date
@@ -131,18 +341,20 @@ def apply_reschedule(entry, scheduled_date, *, notify=True):
     entry.checked_in_at = None
     entry.verified_at = None
     entry.verification_notes = ""
-    entry.save(
-        update_fields=[
-            "secret_code",
-            "status",
-            "scheduled_date",
-            "notified_at",
-            "checked_in_at",
-            "verified_at",
-            "verification_notes",
-            "updated_at",
-        ]
-    )
+    update_fields = [
+        "secret_code",
+        "status",
+        "scheduled_date",
+        "notified_at",
+        "checked_in_at",
+        "verified_at",
+        "verification_notes",
+        "updated_at",
+    ]
+    if position is not None:
+        entry.position = position
+        update_fields.append("position")
+    entry.save(update_fields=update_fields)
 
     channels = []
     if notify:
@@ -161,14 +373,14 @@ def apply_reschedule(entry, scheduled_date, *, notify=True):
             position=entry.position,
         )
         subject = f"KabQue: Rescheduled approval on {scheduled_date.isoformat()}"
-        email = entry.student.user.email
-        phone = entry.student.user.phone
-        if email:
-            ok, err = send_email_notification(email, subject, body)
-            channels.append({"channel": "email", "success": ok, "error": err})
-        if phone:
-            ok, err = send_sms_notification(phone, sms_body)
-            channels.append({"channel": "sms", "success": ok, "error": err})
+        # Same profile email/phone the fresher saved after signup
+        channels = deliver_student_notification(
+            user=entry.student.user,
+            channel=channel,
+            subject=subject,
+            email_body=body,
+            sms_body=sms_body,
+        )
 
     return code, channels
 
@@ -210,6 +422,10 @@ def build_queue_counts():
     counts["approved"] = lifetime_approved + approved_live
     counts["rejected"] = lifetime_rejected + rejected_live
     counts["remaining"] = counts["waiting"] or 0
+    # Unapproved students still sitting in batch result tables (carry into next notify)
+    leftover_n = len(collect_batch_leftovers())
+    counts["batch_leftovers"] = leftover_n
+    counts["notify_pool"] = (counts["waiting"] or 0) + leftover_n
     return counts
 
 
@@ -334,6 +550,9 @@ class LoginView(APIView):
                     {"detail": "Invalid credentials."},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
+            locked = _reject_if_locked(user_obj, password)
+            if locked:
+                return locked
             user = authenticate(username=user_obj.username, password=password)
             if user is None or not user.is_main_admin:
                 return Response(
@@ -359,6 +578,9 @@ class LoginView(APIView):
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
+            locked = _reject_if_locked(user_obj, password)
+            if locked:
+                return locked
             user = authenticate(username=user_obj.username, password=password)
             if user is None:
                 return Response(
@@ -395,6 +617,9 @@ class LoginView(APIView):
                     {"detail": "Invalid credentials."},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
+            locked = _reject_if_locked(profile.user, password)
+            if locked:
+                return locked
             user = authenticate(username=profile.user.username, password=password)
             if user is None:
                 return Response(
@@ -450,6 +675,7 @@ class StudentQueueStatusView(APIView):
                 {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
             )
 
+        clear_waiting_batch_numbers()
         profile = request.user.profile
         entry = get_queue_entry(profile)
         if not entry:
@@ -465,7 +691,7 @@ class StudentQueueStatusView(APIView):
         payload["in_queue"] = True
         payload["profile_complete"] = profile.is_profile_complete
         payload["students_ahead_waiting"] = ahead
-        payload["has_batch_number"] = entry.position is not None
+        payload["has_batch_number"] = has_batch_queue_number(entry)
         return Response(payload)
 
 
@@ -538,6 +764,7 @@ class JoinQueueView(APIView):
         )
 
         # Join only — no batch number yet. Numbers are assigned when supervisor notifies.
+        clear_waiting_batch_numbers()
         QueueEntry.ensure_nullable_position()
         try:
             entry = QueueEntry.objects.create(student=profile, position=None)
@@ -557,10 +784,15 @@ class JoinQueueView(APIView):
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
 
+        if entry.position is not None:
+            entry.position = None
+            entry.save(update_fields=["position", "updated_at"])
+
         payload = QueueEntrySerializer(entry, context={"request": request}).data
         payload["in_queue"] = True
         payload["students_ahead_waiting"] = waiting_ahead_count(entry)
         payload["has_batch_number"] = False
+        payload["position"] = None
         return Response(
             {
                 "message": (
@@ -575,7 +807,7 @@ class JoinQueueView(APIView):
 
 
 class StudentRescheduleView(APIView):
-    """Fresher picks a new approval day when they cannot attend the assigned one."""
+    """Student cannot attend: return to waiting queue (no self-chosen date)."""
 
     @transaction.atomic
     def post(self, request):
@@ -591,23 +823,27 @@ class StudentRescheduleView(APIView):
             )
         if not can_reschedule_entry(entry):
             return Response(
-                {"detail": "No assigned day to reschedule."},
+                {
+                    "detail": (
+                        "You can only return to waiting after you have been "
+                        "scheduled for an approval day."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = RescheduleSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        code, channels = apply_reschedule(
-            entry, serializer.validated_data["scheduled_date"], notify=True
-        )
+        return_student_to_waiting_queue(entry)
         entry.refresh_from_db()
         payload = QueueEntrySerializer(entry, context={"request": request}).data
         payload["in_queue"] = True
+        payload["students_ahead_waiting"] = waiting_ahead_count(entry)
         return Response(
             {
-                "message": f"Rescheduled to {serializer.validated_data['scheduled_date']}.",
-                "secret_code": code,
-                "channels": channels,
+                "message": (
+                    "You have been returned to the waiting queue. "
+                    "You cannot choose a priority date — please wait until "
+                    "the supervisor notifies the next approval schedule."
+                ),
                 "queue": payload,
             }
         )
@@ -653,6 +889,7 @@ class AdminDashboardView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
+        clear_waiting_batch_numbers()
         counts = build_queue_counts()
         by_faculty = list(
             QueueEntry.objects.values("student__faculty")
@@ -692,6 +929,7 @@ class AdminQueueListView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
+        clear_waiting_batch_numbers()
         qs = (
             QueueEntry.objects.select_related("student", "student__user")
             .all()
@@ -712,8 +950,11 @@ class AdminQueueListView(APIView):
 
 class NotifyBatchView(APIView):
     """
-    Notify the next waiting students in arrival order (first come, first served).
-    Assigns batch queue numbers 1…N for the size the supervisor requests.
+    Build the next day batch of size N:
+    1) Remaining unapproved students still in batch result tables (carry-overs)
+    2) Then waiting students in arrival order
+
+    Assigns fresh queue numbers 1…N including carry-overs, then notifies.
     """
 
     permission_classes = [IsQueueAdmin]
@@ -726,17 +967,24 @@ class NotifyBatchView(APIView):
         scheduled_date = serializer.validated_data["scheduled_date"]
         channel = serializer.validated_data["channel"]
 
+        leftovers = collect_batch_leftovers()
         waiting_qs = (
             QueueEntry.objects.select_for_update()
             .select_related("student", "student__user")
             .filter(status=QueueEntry.Status.WAITING)
             .order_by("created_at", "id")
         )
-        available = waiting_qs.count()
-        if available == 0:
+        waiting_available = waiting_qs.count()
+        leftover_available = len(leftovers)
+        pool_available = leftover_available + waiting_available
+
+        if pool_available == 0:
             return Response(
                 {
-                    "detail": "No students remaining in the waiting queue.",
+                    "detail": (
+                        "No students to notify. Waiting queue is empty and no "
+                        "unapproved students remain in a batch table."
+                    ),
                     "requested": requested,
                     "available": 0,
                     "remaining": 0,
@@ -744,25 +992,116 @@ class NotifyBatchView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        take = min(requested, available)
-        entries = list(waiting_qs[:take])
-        shortage = requested > available
+        take_leftover = min(requested, leftover_available)
+        take_waiting = min(requested - take_leftover, waiting_available)
+        carry_entries = leftovers[:take_leftover]
+        waiting_entries = list(waiting_qs[:take_waiting])
+        shortage = requested > pool_available
 
+        # Leftovers leave their old day tables; waiting rows clear stale numbers
+        detach_entries_from_batch_ids = {}
+        for entry in carry_entries:
+            for bid in batch_ids_for_entry(entry.id):
+                detach_entries_from_batch_ids.setdefault(bid, []).append(entry.id)
+        for bid, ids in detach_entries_from_batch_ids.items():
+            detach_entries_from_batch(bid, ids)
+            recompact_batch_positions(bid)
+
+        clear_waiting_batch_numbers()
+        for entry in waiting_entries:
+            entry.refresh_from_db(fields=["position", "status", "updated_at"])
+
+        total_plan = take_leftover + take_waiting
         batch = NotificationBatch.objects.create(
             created_by=request.user,
             scheduled_date=scheduled_date,
-            batch_size=len(entries),
+            batch_size=total_plan,
             channel=channel,
+            message_template=(
+                f"Notify {total_plan} (carry {take_leftover} + waiting {take_waiting})"
+            ),
         )
 
         results = []
-        email_ok = 0
-        email_fail = 0
-        sms_ok = 0
-        sms_fail = 0
+        email_ok = email_fail = sms_ok = sms_fail = 0
         sms_errors = []
         now = timezone.now()
-        for batch_number, entry in enumerate(entries, start=1):
+        batch_number = 0
+
+        def append_delivery(entry, code, channels_tried, number):
+            nonlocal email_ok, email_fail, sms_ok, sms_fail
+            body = build_approval_message(
+                full_name=entry.student.full_name,
+                registration_number=entry.student.registration_number,
+                scheduled_date=scheduled_date,
+                secret_code=code,
+                position=number,
+            )
+            sms_body = build_approval_sms(
+                full_name=entry.student.full_name,
+                registration_number=entry.student.registration_number,
+                scheduled_date=scheduled_date,
+                secret_code=code,
+                position=number,
+            )
+            for attempt in channels_tried:
+                if attempt["channel"] == "email":
+                    if attempt["success"]:
+                        email_ok += 1
+                    else:
+                        email_fail += 1
+                elif attempt["channel"] == "sms":
+                    if attempt["success"]:
+                        sms_ok += 1
+                    else:
+                        sms_fail += 1
+                        err = attempt.get("error") or ""
+                        if err and err not in sms_errors:
+                            sms_errors.append(err)
+                NotificationLog.objects.create(
+                    batch=batch,
+                    queue_entry=entry,
+                    channel=attempt["channel"],
+                    destination=attempt.get("destination") or "",
+                    body=body if attempt["channel"] == "email" else sms_body,
+                    success=attempt["success"],
+                    error_message=attempt.get("error") or "",
+                )
+            results.append(serialize_batch_student(entry, channels=channels_tried))
+
+        # 1) Carry remaining unapproved from prior batch tables — get numbers first
+        for locked in carry_entries:
+            entry = (
+                QueueEntry.objects.select_for_update()
+                .select_related("student", "student__user")
+                .filter(pk=locked.pk)
+                .first()
+            )
+            if entry is None or entry.status not in ACTIVE_BATCH_STATUSES:
+                continue
+            batch_number += 1
+            code, channels_tried = apply_reschedule(
+                entry,
+                scheduled_date,
+                notify=True,
+                channel=channel,
+                position=batch_number,
+            )
+            entry.refresh_from_db()
+            append_delivery(entry, code, channels_tried, batch_number)
+
+        # 2) Fill remaining seats from waiting (arrival order)
+        for locked in waiting_entries:
+            entry = (
+                QueueEntry.objects.select_for_update()
+                .select_related("student", "student__user")
+                .filter(pk=locked.pk, status=QueueEntry.Status.WAITING)
+                .first()
+            )
+            if entry is None:
+                continue
+
+            batch_number += 1
             code = entry.assign_secret_code()
             entry.status = QueueEntry.Status.NOTIFIED
             entry.scheduled_date = scheduled_date
@@ -778,7 +1117,7 @@ class NotifyBatchView(APIView):
                     "updated_at",
                 ]
             )
-
+            subject = f"KabQue: Document approval on {scheduled_date.isoformat()}"
             body = build_approval_message(
                 full_name=entry.student.full_name,
                 registration_number=entry.student.registration_number,
@@ -793,75 +1132,40 @@ class NotifyBatchView(APIView):
                 secret_code=code,
                 position=batch_number,
             )
-            subject = f"KabQue: Document approval on {scheduled_date.isoformat()}"
+            channels_tried = deliver_student_notification(
+                user=entry.student.user,
+                channel=channel,
+                subject=subject,
+                email_body=body,
+                sms_body=sms_body,
+            )
+            append_delivery(entry, code, channels_tried, batch_number)
 
-            channels_tried = []
-            if channel in ("email", "both"):
-                ok, err = send_email_notification(
-                    entry.student.user.email, subject, body
-                )
-                if ok:
-                    email_ok += 1
-                else:
-                    email_fail += 1
-                NotificationLog.objects.create(
-                    batch=batch,
-                    queue_entry=entry,
-                    channel="email",
-                    destination=entry.student.user.email or "",
-                    body=body,
-                    success=ok,
-                    error_message=err,
-                )
-                channels_tried.append({"channel": "email", "success": ok, "error": err})
-
-            if channel in ("sms", "both"):
-                phone = normalize_phone(entry.student.user.phone)
-                ok, err = send_sms_notification(phone, sms_body)
-                if ok:
-                    sms_ok += 1
-                else:
-                    sms_fail += 1
-                    if err and err not in sms_errors:
-                        sms_errors.append(err)
-                NotificationLog.objects.create(
-                    batch=batch,
-                    queue_entry=entry,
-                    channel="sms",
-                    destination=phone or entry.student.user.phone or "",
-                    body=sms_body,
-                    success=ok,
-                    error_message=err,
-                )
-                channels_tried.append({"channel": "sms", "success": ok, "error": err})
-
-            results.append(
+        if not results:
+            return Response(
                 {
-                    "position": batch_number,
-                    "registration_number": entry.student.registration_number,
-                    "full_name": entry.student.full_name,
-                    "email": entry.student.user.email or "",
-                    "phone": normalize_phone(entry.student.user.phone)
-                    or entry.student.user.phone
-                    or "",
-                    "secret_code": code,
-                    "scheduled_date": scheduled_date.isoformat(),
-                    "channels": channels_tried,
-                }
+                    "detail": "No students could be notified. Try again.",
+                    "requested": requested,
+                    "available": pool_available,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         remaining = QueueEntry.objects.filter(status=QueueEntry.Status.WAITING).count()
+        carried_count = take_leftover
         if shortage:
             message = (
-                f"Only {available} student(s) were waiting. "
-                f"Assigned queue numbers 1–{len(results)} and notified them "
+                f"Only {pool_available} student(s) were available "
+                f"(batch leftovers + waiting). Assigned queue numbers 1–{len(results)} "
                 f"(you requested {requested}). {remaining} still waiting."
             )
         else:
             message = (
-                f"Assigned queue numbers 1–{len(results)} to the next "
-                f"{len(results)} student(s) in arrival order and notified them. "
-                f"{remaining} remaining to notify."
+                f"Assigned queue numbers 1–{len(results)} for {scheduled_date.isoformat()} "
+                f"({carried_count} from prior batch table"
+                f"{'' if carried_count == 1 else 's'} + "
+                f"{max(0, len(results) - carried_count)} newly waiting). "
+                f"{remaining} still waiting."
             )
         if channel in ("email", "both"):
             message += f" Emails: {email_ok}."
@@ -877,7 +1181,9 @@ class NotifyBatchView(APIView):
                 "batch": NotificationBatchSerializer(batch).data,
                 "message": message,
                 "requested": requested,
-                "available": available,
+                "available": pool_available,
+                "carried_from_batch": carried_count,
+                "from_waiting": max(0, len(results) - carried_count),
                 "notified_count": len(results),
                 "emails_sent": email_ok,
                 "emails_failed": email_fail,
@@ -889,6 +1195,7 @@ class NotifyBatchView(APIView):
                 ),
                 "shortage": shortage,
                 "remaining": remaining,
+                "remaining_in_batch": len(results),
                 "students": results,
             },
             status=status.HTTP_201_CREATED,
@@ -1041,10 +1348,12 @@ class CompleteVerificationView(APIView):
         notes = serializer.validated_data.get("notes", "")
         removed_from_queue = False
         entry_payload = None
+        removed_queue_entry_id = entry.id
+        linked_batch_ids = batch_ids_for_entry(entry.id)
 
         try:
             if decision in ("approved", "rejected"):
-                # Record desk outcome, then leave the live queue.
+                # Record desk outcome, then leave the live queue + batch result table.
                 CampusSettings.ensure_lifetime_columns()
                 campus = CampusSettings.get_solo()
                 if decision == "approved":
@@ -1057,6 +1366,8 @@ class CompleteVerificationView(APIView):
                 NotificationLog.ensure_nullable_queue_entry()
                 remove_queue_entry(entry)
                 removed_from_queue = True
+                for bid in linked_batch_ids:
+                    recompact_batch_positions(bid)
             else:
                 entry.status = decision
                 entry.verified_at = timezone.now()
@@ -1083,16 +1394,40 @@ class CompleteVerificationView(APIView):
 
         counts = build_queue_counts()
         labels = {
-            "approved": "Approved — documents accepted. Student removed from the live queue.",
-            "rejected": "Rejected — documents not accepted. Student removed from the live queue.",
-            "skipped": "Marked as no-show. Student stays in the queue for a return visit.",
+            "approved": "Approved — documents accepted. Student removed from the live queue and batch table.",
+            "rejected": "Rejected — documents not accepted. Student removed from the live queue and batch table.",
+            "skipped": "Marked as no-show. Student stays in the batch for end-of-day reschedule.",
         }
+
+        active_batch = None
+        batch_payload = None
+        if linked_batch_ids:
+            # Prefer the most recent linked batch that still has remaining students
+            for bid in sorted(linked_batch_ids, reverse=True):
+                batch = NotificationBatch.objects.filter(id=bid).first()
+                if not batch:
+                    continue
+                live = live_batch_entries(bid)
+                if decision in ("approved", "rejected") or live:
+                    active_batch = batch
+                    batch_payload = build_live_batch_payload(batch)
+                    break
+            if active_batch is None and linked_batch_ids:
+                batch = NotificationBatch.objects.filter(id=linked_batch_ids[-1]).first()
+                if batch:
+                    active_batch = batch
+                    batch_payload = build_live_batch_payload(batch)
+
         return Response(
             {
                 "message": labels.get(decision, f"Marked as {decision}."),
                 "entry": entry_payload,
                 "removed_from_queue": removed_from_queue,
+                "removed_queue_entry_id": removed_queue_entry_id
+                if removed_from_queue
+                else None,
                 "counts": counts,
+                "batch": batch_payload,
             }
         )
 
@@ -1125,6 +1460,12 @@ class AdminRescheduleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Leave the day's leftover batch table — they're moved to a new schedule
+        linked = batch_ids_for_entry(entry.id)
+        detach_entry_from_batches(entry)
+        for bid in linked:
+            recompact_batch_positions(bid)
+
         code, channels = apply_reschedule(
             entry, serializer.validated_data["scheduled_date"], notify=True
         )
@@ -1135,6 +1476,196 @@ class AdminRescheduleView(APIView):
                 "secret_code": code,
                 "channels": channels,
                 "entry": AdminQueueEntrySerializer(entry).data,
+            }
+        )
+
+
+class AdminActiveBatchView(APIView):
+    """
+    Latest notification batch that still has students awaiting desk completion.
+    Approved/rejected students are already gone from this view.
+    """
+
+    permission_classes = [IsQueueAdmin]
+
+    def get(self, request):
+        batch_id = request.query_params.get("batch_id")
+        if batch_id:
+            batch = NotificationBatch.objects.filter(id=batch_id).first()
+            if not batch:
+                return Response(
+                    {"detail": "Batch not found."}, status=status.HTTP_404_NOT_FOUND
+                )
+            return Response(build_live_batch_payload(batch))
+
+        # Prefer the newest batch that still has remaining (unapproved) students
+        for batch in NotificationBatch.objects.order_by("-created_at", "-id")[:40]:
+            if live_batch_entries(batch.id):
+                return Response(build_live_batch_payload(batch))
+
+        return Response(
+            {
+                "batch": None,
+                "students": [],
+                "notified_count": 0,
+                "remaining_in_batch": 0,
+                "message": "No open batch with remaining students.",
+            }
+        )
+
+
+class AdminBatchRescheduleView(APIView):
+    """
+    End-of-day / mid-day move: remaining (not approved) students in the batch
+    table are assigned fresh queue numbers 1…N on a new approval day.
+    """
+
+    permission_classes = [IsQueueAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = BatchRescheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        batch_id = serializer.validated_data["batch_id"]
+        requested = serializer.validated_data["count"]
+        scheduled_date = serializer.validated_data["scheduled_date"]
+        channel = serializer.validated_data.get("channel") or "both"
+
+        source_batch = NotificationBatch.objects.filter(id=batch_id).first()
+        if not source_batch:
+            return Response(
+                {"detail": "Batch not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Only students still in the batch table (not approved / rejected)
+        eligible = [
+            e for e in live_batch_entries(batch_id) if can_reschedule_entry(e)
+        ]
+        available = len(eligible)
+        if available == 0:
+            return Response(
+                {
+                    "detail": (
+                        "No students remain in this batch table. "
+                        "Approved students already left; notify a new waiting batch if needed."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        to_move = eligible[:requested]
+        shortage = requested > available
+        move_ids = [e.id for e in to_move]
+
+        # They leave the old day's batch table, then get numbers on the new day
+        detach_entries_from_batch(batch_id, move_ids)
+
+        new_batch = NotificationBatch.objects.create(
+            created_by=request.user,
+            scheduled_date=scheduled_date,
+            batch_size=len(to_move),
+            channel=channel,
+            message_template=f"Reschedule remaining from batch {batch_id}",
+        )
+
+        results = []
+        email_ok = email_fail = sms_ok = sms_fail = 0
+        sms_errors = []
+
+        for index, entry in enumerate(to_move, start=1):
+            code, channels_tried = apply_reschedule(
+                entry,
+                scheduled_date,
+                notify=True,
+                channel=channel,
+                position=index,
+            )
+            entry.refresh_from_db()
+
+            body = build_approval_message(
+                full_name=entry.student.full_name,
+                registration_number=entry.student.registration_number,
+                scheduled_date=scheduled_date,
+                secret_code=code,
+                position=index,
+            )
+            sms_body = build_approval_sms(
+                full_name=entry.student.full_name,
+                registration_number=entry.student.registration_number,
+                scheduled_date=scheduled_date,
+                secret_code=code,
+                position=index,
+            )
+
+            for attempt in channels_tried:
+                if attempt["channel"] == "email":
+                    if attempt["success"]:
+                        email_ok += 1
+                    else:
+                        email_fail += 1
+                elif attempt["channel"] == "sms":
+                    if attempt["success"]:
+                        sms_ok += 1
+                    else:
+                        sms_fail += 1
+                        err = attempt.get("error") or ""
+                        if err and err not in sms_errors:
+                            sms_errors.append(err)
+
+                NotificationLog.objects.create(
+                    batch=new_batch,
+                    queue_entry=entry,
+                    channel=attempt["channel"],
+                    destination=attempt.get("destination") or "",
+                    body=body if attempt["channel"] == "email" else sms_body,
+                    success=attempt["success"],
+                    error_message=attempt.get("error") or "",
+                )
+
+            results.append(serialize_batch_student(entry, channels=channels_tried))
+
+        message = (
+            f"Moved {len(results)} remaining batch student"
+            f"{'s' if len(results) != 1 else ''} to {scheduled_date.isoformat()} "
+            f"with queue numbers 1–{len(results)}."
+        )
+        if shortage:
+            message += (
+                f" Requested {requested}; only {available} were still in the batch "
+                f"table (others were already approved)."
+            )
+        if channel in ("email", "both"):
+            message += f" Emails: {email_ok}."
+            if email_fail:
+                message += f" Email failed: {email_fail}."
+        if channel in ("sms", "both"):
+            message += f" SMS: {sms_ok}."
+            if sms_fail:
+                message += f" SMS failed: {sms_fail}."
+
+        remaining = QueueEntry.objects.filter(status=QueueEntry.Status.WAITING).count()
+        return Response(
+            {
+                "batch": NotificationBatchSerializer(new_batch).data,
+                "source_batch_id": batch_id,
+                "message": message,
+                "requested": requested,
+                "available": available,
+                "notified_count": len(results),
+                "remaining_in_batch": len(results),
+                "emails_sent": email_ok,
+                "emails_failed": email_fail,
+                "sms_sent": sms_ok,
+                "sms_failed": sms_fail,
+                "sms_errors": sms_errors[:3],
+                "sms_configured": bool(
+                    (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
+                ),
+                "shortage": shortage,
+                "remaining": remaining,
+                "students": results,
+                "rescheduled": True,
             }
         )
 
@@ -1193,13 +1724,19 @@ def _main_admin_student_row(profile):
         "full_name": profile.full_name or user.get_full_name() or user.username,
         "role": user.role,
         "is_approved": user.is_approved,
+        "is_active": user.is_active,
+        "is_locked": not user.is_active,
         "date_joined": user.date_joined,
         "registration_number": profile.registration_number,
         "faculty": profile.faculty or "",
         "programme": profile.programme or "",
         "profile_complete": profile.is_profile_complete,
         "verification_status": verification_status,
-        "queue_position": queue_position,
+        "queue_position": (
+            None
+            if verification_status == QueueEntry.Status.WAITING
+            else queue_position
+        ),
         "scheduled_date": scheduled_date,
     }
 
@@ -1213,6 +1750,8 @@ def _main_admin_staff_row(user):
         "full_name": user.get_full_name() or user.username,
         "role": user.role,
         "is_approved": user.is_approved,
+        "is_active": user.is_active,
+        "is_locked": not user.is_active,
         "date_joined": user.date_joined,
         "registration_number": "",
         "faculty": "",
@@ -1222,6 +1761,66 @@ def _main_admin_staff_row(user):
         "queue_position": None,
         "scheduled_date": None,
     }
+
+
+def _main_admin_manageable_target(request, user_id):
+    """
+    Resolve a student or supervisor the current Main Admin may manage.
+    Returns (user, error_response).
+    """
+    target = User.objects.filter(pk=user_id).first()
+    if not target:
+        return None, Response(
+            {"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND
+        )
+    if target.pk == request.user.pk:
+        return None, Response(
+            {"detail": "You cannot modify your own account here."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if target.is_main_admin or target.role == User.Role.MAIN_ADMIN:
+        return None, Response(
+            {"detail": "Main Admin accounts cannot be locked or deleted here."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if target.role not in (User.Role.STUDENT, User.Role.ADMIN):
+        return None, Response(
+            {"detail": "Only students and supervisors can be managed."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return target, None
+
+
+def _permanently_delete_user(target: User) -> str:
+    """Delete user and related KabQue data (profile, queue, logs)."""
+    role_label = "student" if target.role == User.Role.STUDENT else "supervisor"
+    label = target.email or target.username
+    if target.role == User.Role.STUDENT:
+        try:
+            label = target.profile.registration_number
+        except StudentProfile.DoesNotExist:
+            pass
+
+    if hasattr(target, "profile"):
+        try:
+            profile = target.profile
+        except StudentProfile.DoesNotExist:
+            profile = None
+        if profile is not None:
+            try:
+                entry = profile.queue_entry
+            except QueueEntry.DoesNotExist:
+                entry = None
+            if entry is not None:
+                NotificationLog.ensure_nullable_queue_entry()
+                NotificationLog.objects.filter(queue_entry_id=entry.id).update(
+                    queue_entry=None
+                )
+                entry.delete()
+
+    # Cascades StudentProfile; NotificationBatch.created_by is SET_NULL
+    target.delete()
+    return f"{role_label.capitalize()} {label} permanently deleted."
 
 
 class MainAdminOverviewView(APIView):
@@ -1352,3 +1951,59 @@ class MainAdminApproveSupervisorView(APIView):
                 "user": _main_admin_staff_row(target),
             }
         )
+
+
+class MainAdminLockUserView(APIView):
+    """Lock or unlock a student / supervisor account (blocks sign-in when locked)."""
+
+    permission_classes = [IsMainAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = MainAdminLockUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        target, err = _main_admin_manageable_target(
+            request, serializer.validated_data["user_id"]
+        )
+        if err:
+            return err
+
+        lock = bool(serializer.validated_data["lock"])
+        target.is_active = not lock
+        target.save(update_fields=["is_active"])
+        label = target.email or getattr(
+            getattr(target, "profile", None), "registration_number", None
+        ) or target.username
+        return Response(
+            {
+                "message": (
+                    f"Account locked: {label}. They can no longer sign in."
+                    if lock
+                    else f"Account unlocked: {label}. They can sign in again."
+                ),
+                "user": (
+                    _main_admin_student_row(target.profile)
+                    if target.role == User.Role.STUDENT and hasattr(target, "profile")
+                    else _main_admin_staff_row(target)
+                ),
+            }
+        )
+
+
+class MainAdminDeleteUserView(APIView):
+    """Permanently delete a student or supervisor and related KabQue data."""
+
+    permission_classes = [IsMainAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = MainAdminUserIdSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        target, err = _main_admin_manageable_target(
+            request, serializer.validated_data["user_id"]
+        )
+        if err:
+            return err
+
+        message = _permanently_delete_user(target)
+        return Response({"message": message, "deleted_user_id": serializer.validated_data["user_id"]})

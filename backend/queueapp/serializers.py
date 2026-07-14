@@ -4,9 +4,11 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from .auth_utils import (
+    email_already_registered,
     is_kab_university_email,
     kab_email_error_message,
     normalize_email,
+    phone_already_registered,
     username_is_main_admin,
 )
 from .geo import is_on_campus
@@ -104,9 +106,13 @@ class LecturerRegisterSerializer(serializers.Serializer):
         if not is_kab_university_email(email):
             raise serializers.ValidationError(kab_email_error_message())
         if User.objects.filter(email__iexact=email).exists():
-            raise serializers.ValidationError("This university email is already registered.")
+            raise serializers.ValidationError(
+                "This university email is already registered to another account."
+            )
         if User.objects.filter(username__iexact=email).exists():
-            raise serializers.ValidationError("This university email is already registered.")
+            raise serializers.ValidationError(
+                "This university email is already registered to another account."
+            )
         return email
 
     @transaction.atomic
@@ -170,11 +176,18 @@ class CompleteStudentProfileSerializer(serializers.Serializer):
             raise serializers.ValidationError({"programme": "Programme is required."})
 
         user = self.context["request"].user
-        if email:
-            taken = User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists()
-            if taken:
-                raise serializers.ValidationError({"email": "Email already in use."})
-            # Students may use any email for notifications; lecturers alone require @kab.ac.ug
+        errors = {}
+        if email and email_already_registered(email, exclude_user_id=user.pk):
+            errors["email"] = (
+                "This email already belongs to another account. Use a different email."
+            )
+        if phone and phone_already_registered(phone, exclude_user_id=user.pk):
+            errors["phone"] = (
+                "This telephone number already belongs to another account. "
+                "Use a different number."
+            )
+        if errors:
+            raise serializers.ValidationError(errors)
         return attrs
 
     @transaction.atomic
@@ -193,7 +206,33 @@ class CompleteStudentProfileSerializer(serializers.Serializer):
         parts = data["full_name"].split()
         user.first_name = parts[0]
         user.last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
-        user.save(update_fields=["email", "phone", "first_name", "last_name"])
+        try:
+            user.save(update_fields=["email", "phone", "first_name", "last_name"])
+        except Exception as exc:
+            # DB unique constraints (race-safe) → clear field-level errors
+            from django.db import IntegrityError
+
+            if isinstance(exc, IntegrityError):
+                msg = str(exc).lower()
+                if "email" in msg:
+                    raise serializers.ValidationError(
+                        {
+                            "email": (
+                                "This email already belongs to another account. "
+                                "Use a different email."
+                            )
+                        }
+                    ) from exc
+                if "phone" in msg:
+                    raise serializers.ValidationError(
+                        {
+                            "phone": (
+                                "This telephone number already belongs to another account. "
+                                "Use a different number."
+                            )
+                        }
+                    ) from exc
+            raise
 
         return profile
 
@@ -244,6 +283,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 class QueueEntrySerializer(serializers.ModelSerializer):
     student = StudentProfileSerializer(read_only=True)
     secret_code = serializers.SerializerMethodField()
+    position = serializers.SerializerMethodField()
 
     class Meta:
         model = QueueEntry
@@ -260,6 +300,12 @@ class QueueEntrySerializer(serializers.ModelSerializer):
             "created_at",
             "student",
         )
+
+    def get_position(self, obj):
+        # Batch numbers exist only after notify — never for waiting joiners
+        if obj.status == QueueEntry.Status.WAITING:
+            return None
+        return obj.position
 
     def get_secret_code(self, obj):
         request = self.context.get("request")
@@ -284,6 +330,7 @@ class QueueEntrySerializer(serializers.ModelSerializer):
 
 class AdminQueueEntrySerializer(serializers.ModelSerializer):
     student = StudentProfileSerializer(read_only=True)
+    position = serializers.SerializerMethodField()
 
     class Meta:
         model = QueueEntry
@@ -300,6 +347,11 @@ class AdminQueueEntrySerializer(serializers.ModelSerializer):
             "created_at",
             "student",
         )
+
+    def get_position(self, obj):
+        if obj.status == QueueEntry.Status.WAITING:
+            return None
+        return obj.position
 
 
 class NotifyBatchSerializer(serializers.Serializer):
@@ -323,6 +375,23 @@ class CompleteVerificationSerializer(serializers.Serializer):
 class RescheduleSerializer(serializers.Serializer):
     scheduled_date = serializers.DateField()
     queue_entry_id = serializers.IntegerField(required=False)
+
+    def validate_scheduled_date(self, value):
+        today = timezone.localdate()
+        if value < today:
+            raise serializers.ValidationError("Choose today or a future date.")
+        return value
+
+
+class BatchRescheduleSerializer(serializers.Serializer):
+    """Reschedule the first N students from a notified batch onto a new day."""
+
+    batch_id = serializers.IntegerField()
+    count = serializers.IntegerField(min_value=1, max_value=500)
+    scheduled_date = serializers.DateField()
+    channel = serializers.ChoiceField(
+        choices=["email", "sms", "both"], default="both", required=False
+    )
 
     def validate_scheduled_date(self, value):
         today = timezone.localdate()
@@ -385,3 +454,12 @@ class MainAdminUserSerializer(serializers.Serializer):
 class ApproveSupervisorSerializer(serializers.Serializer):
     user_id = serializers.IntegerField()
     approve = serializers.BooleanField(default=True)
+
+
+class MainAdminUserIdSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
+
+
+class MainAdminLockUserSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
+    lock = serializers.BooleanField()

@@ -2,8 +2,9 @@ export default function SecretCodeCard({ code, scheduledDate }) {
   if (!code) {
     return (
       <p className="muted block-note">
-        You are in the priority queue. When your day is set, KabQue will send an
-        email/SMS with your secret code.
+        You are waiting for the next supervisor schedule. KabQue will send an
+        email/SMS with your queue number and secret code when your batch is
+        notified — you cannot set that date yourself.
       </p>
     );
   }

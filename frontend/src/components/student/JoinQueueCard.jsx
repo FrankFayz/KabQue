@@ -30,29 +30,32 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
   const [info, setInfo] = useState('');
   const [phase, setPhase] = useState('idle'); // idle | locating | confirming | done
   const [loading, setLoading] = useState(false);
-  const [savingPhone, setSavingPhone] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
   const [phone, setPhone] = useState(profile?.phone || '');
-  const [editingPhone, setEditingPhone] = useState(false);
+  const [email, setEmail] = useState(profile?.email || '');
+  const [editing, setEditing] = useState(null); // null | 'email' | 'phone'
 
   useEffect(() => {
     setPhone(profile?.phone || '');
-  }, [profile?.phone]);
+    setEmail(profile?.email || '');
+  }, [profile?.phone, profile?.email]);
 
-  async function savePhone(e) {
+  async function saveContact(e) {
     e.preventDefault();
     setError('');
-    const next = phone.trim();
-    if (next && !isValidE164(next)) {
+    const nextPhone = phone.trim();
+    const nextEmail = email.trim();
+    if (nextPhone && !isValidE164(nextPhone)) {
       setError(
         'Enter a valid East African mobile number with country code (e.g. Uganda +256…).'
       );
       return;
     }
-    if (!next && !(profile?.email || '').trim()) {
-      setError('Provide a telephone number (or keep an email on your profile) for notifications.');
+    if (!nextEmail && !nextPhone) {
+      setError('Keep at least an email or telephone for notifications.');
       return;
     }
-    setSavingPhone(true);
+    setSavingContact(true);
     try {
       const data = await api('/student/profile/', {
         method: 'POST',
@@ -60,18 +63,20 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
           full_name: profile?.full_name || '',
           faculty: profile?.faculty || '',
           programme: profile?.programme || '',
-          email: profile?.email || '',
-          phone: next,
+          email: nextEmail,
+          phone: nextPhone,
         },
       });
       if (data.user) setAuth({ user: data.user });
-      setEditingPhone(false);
-      setInfo('SMS number updated.');
+      setEditing(null);
+      setInfo(
+        editing === 'email' ? 'Email updated.' : 'SMS number updated.'
+      );
       onProfileUpdated?.(data);
     } catch (err) {
       setError(scrubError(err.message));
     } finally {
-      setSavingPhone(false);
+      setSavingContact(false);
     }
   }
 
@@ -103,67 +108,152 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
   }
 
   const locating = phase === 'locating' || phase === 'confirming';
+  const savedEmail = (profile?.email || '').trim();
+  const savedPhone = (profile?.phone || '').trim();
 
   return (
     <Panel title="Join the queue" className="join-queue-card">
       {profile?.full_name ? (
-        <p className="muted">{profile.full_name}</p>
+        <p className="muted join-queue-name">{profile.full_name}</p>
       ) : null}
       {profile && (
-        <div className="status-grid">
+        <div className="status-grid join-profile-grid">
           <div>
             <span className="label">Reg. number</span>
             <strong>{profile.registration_number}</strong>
           </div>
           <div>
             <span className="label">Faculty</span>
-            <strong>{profile.faculty || '—'}</strong>
+            <strong className="join-wrap-text">{profile.faculty || '—'}</strong>
           </div>
           <div>
             <span className="label">Programme</span>
-            <strong>{profile.programme || '—'}</strong>
+            <strong className="join-wrap-text">{profile.programme || '—'}</strong>
           </div>
         </div>
       )}
 
-      <div className="sms-phone-block">
-        <span className="label">SMS number</span>
-        {!editingPhone ? (
-          <div className="sms-phone-summary">
-            <strong>{phone || 'Not set'}</strong>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setEditingPhone(true)}
-            >
-              {phone ? 'Change' : 'Add number'}
-            </button>
+      <section className="join-contact-block" aria-label="Notification contacts">
+        <header className="join-contact-head">
+          <p className="join-contact-kicker">Notification contacts</p>
+          <p className="hint">
+            Saved from your profile — KabQue uses these when your day is notified.
+          </p>
+        </header>
+
+        <div className="join-contact-list">
+          <div className="join-contact-item">
+            <span className="label">Email</span>
+            {editing !== 'email' ? (
+              <div className="join-contact-summary">
+                <strong className="join-contact-value">
+                  {savedEmail || 'Not set'}
+                </strong>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-tiny"
+                  onClick={() => {
+                    setEditing('email');
+                    setEmail(savedEmail);
+                    setError('');
+                    setInfo('');
+                  }}
+                >
+                  {savedEmail ? 'Change' : 'Add email'}
+                </button>
+              </div>
+            ) : (
+              <form className="join-contact-edit" onSubmit={saveContact}>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  disabled={savingContact}
+                />
+                <div className="join-contact-edit-actions">
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-tiny"
+                    disabled={savingContact}
+                  >
+                    {savingContact ? 'Saving…' : 'Save email'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-tiny"
+                    disabled={savingContact}
+                    onClick={() => {
+                      setEditing(null);
+                      setEmail(savedEmail);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
-        ) : (
-          <form className="stack-form" onSubmit={savePhone}>
-            <PhoneInput value={phone} onChange={setPhone} />
-            <div className="cta-row">
-              <button className="btn btn-primary" disabled={savingPhone}>
-                {savingPhone ? 'Saving…' : 'Save number'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={savingPhone}
-                onClick={() => {
-                  setEditingPhone(false);
-                  setPhone(profile?.phone || '');
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
+
+          <div className="join-contact-item">
+            <span className="label">Telephone (SMS)</span>
+            {editing !== 'phone' ? (
+              <div className="join-contact-summary">
+                <strong className="join-contact-value join-contact-phone">
+                  {savedPhone || 'Not set'}
+                </strong>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-tiny"
+                  onClick={() => {
+                    setEditing('phone');
+                    setPhone(savedPhone);
+                    setError('');
+                    setInfo('');
+                  }}
+                >
+                  {savedPhone ? 'Change' : 'Add number'}
+                </button>
+              </div>
+            ) : (
+              <form className="join-contact-edit" onSubmit={saveContact}>
+                <PhoneInput
+                  value={phone}
+                  onChange={setPhone}
+                  disabled={savingContact}
+                />
+                <div className="join-contact-edit-actions">
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-tiny"
+                    disabled={savingContact}
+                  >
+                    {savingContact ? 'Saving…' : 'Save number'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-tiny"
+                    disabled={savingContact}
+                    onClick={() => {
+                      setEditing(null);
+                      setPhone(savedPhone);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      </section>
 
       {locating ? (
-        <div className={`gps-status${phase === 'confirming' ? ' is-confirming' : ''}`} role="status">
+        <div
+          className={`gps-status${phase === 'confirming' ? ' is-confirming' : ''}`}
+          role="status"
+        >
           <div className="gps-status-icon-wrap" aria-hidden="true">
             <span className="gps-pulse" />
             <span className="gps-pulse gps-pulse-delay" />
@@ -189,7 +279,7 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
         type="button"
         className="btn btn-primary btn-join-gps"
         onClick={joinQueue}
-        disabled={loading || editingPhone}
+        disabled={loading || Boolean(editing)}
       >
         {locating ? (
           <>

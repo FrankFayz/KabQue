@@ -1,11 +1,13 @@
 export default function AdminStats({ counts = {} }) {
-  const remaining = counts.remaining ?? counts.waiting ?? 0;
+  const waiting = counts.remaining ?? counts.waiting ?? 0;
+  const leftovers = counts.batch_leftovers ?? 0;
+  const pool = counts.notify_pool ?? waiting + leftovers;
   const items = [
     ['Total', counts.total, 'In queue'],
-    ['Remaining', remaining, 'Still waiting to notify'],
+    ['To schedule', pool, leftovers > 0 ? `${waiting} waiting · ${leftovers} in batch` : 'Waiting + batch leftovers'],
     ['Notified', counts.notified, 'Assigned a day'],
     ['Checked in', counts.checked_in, 'At the desk'],
-    ['Approved', counts.approved, 'Completed'],
+    ['Approved', counts.approved, 'Left batch table'],
   ];
 
   return (
@@ -13,7 +15,7 @@ export default function AdminStats({ counts = {} }) {
       {items.map(([label, value, hint]) => (
         <div
           key={label}
-          className={`stat${label === 'Remaining' ? ' stat-remaining' : ''}`}
+          className={`stat${label === 'To schedule' ? ' stat-remaining' : ''}`}
         >
           <span className="label">{label}</span>
           <strong>{value ?? 0}</strong>

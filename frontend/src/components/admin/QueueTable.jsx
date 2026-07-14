@@ -152,10 +152,16 @@ export default function QueueTable({
               <div className="queue-card-top">
                 <span
                   className={`queue-card-pos${
-                    row.position != null && row.status !== 'waiting' ? '' : ' is-queued'
+                    row.position != null &&
+                    row.status !== 'waiting' &&
+                    Number(row.position) > 0
+                      ? ''
+                      : ' is-queued'
                   }`}
                 >
-                  {row.position != null && row.status !== 'waiting'
+                  {row.position != null &&
+                  row.status !== 'waiting' &&
+                  Number(row.position) > 0
                     ? `#${row.position}`
                     : 'Queued'}
                 </span>

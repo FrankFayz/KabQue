@@ -47,39 +47,47 @@ export default function PhoneInput({
   }
 
   const preview = toE164(dial, national);
+  const selected = EAST_AFRICAN_COUNTRIES.find((c) => c.dial === dial);
 
   return (
     <div className="phone-input">
       <div className="phone-input-row">
-        <select
-          id={`${id}-country`}
-          value={dial}
-          onChange={handleDial}
-          disabled={disabled}
-          aria-label="Country code"
-          required={required}
-        >
-          {EAST_AFRICAN_COUNTRIES.map((c) => (
-            <option key={c.iso} value={c.dial}>
-              {c.flag} {c.name} (+{c.dial})
-            </option>
-          ))}
-        </select>
-        <input
-          id={id}
-          type="tel"
-          inputMode="numeric"
-          autoComplete="tel-national"
-          value={national}
-          onChange={handleNational}
-          placeholder={placeholder}
-          disabled={disabled}
-          required={required}
-          aria-label="Phone number"
-        />
+        <label className="phone-input-country" htmlFor={`${id}-country`}>
+          <span className="phone-input-label">Country</span>
+          <select
+            id={`${id}-country`}
+            value={dial}
+            onChange={handleDial}
+            disabled={disabled}
+            aria-label="Country code"
+            required={required}
+            title={selected ? `${selected.name} (+${selected.dial})` : 'Country'}
+          >
+            {EAST_AFRICAN_COUNTRIES.map((c) => (
+              <option key={c.iso} value={c.dial} title={`${c.name} (+${c.dial})`}>
+                {c.flag} {c.iso} +{c.dial}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="phone-input-national" htmlFor={id}>
+          <span className="phone-input-label">Mobile number</span>
+          <input
+            id={id}
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            value={national}
+            onChange={handleNational}
+            placeholder={placeholder}
+            disabled={disabled}
+            required={required}
+            aria-label="Phone number"
+          />
+        </label>
       </div>
       <p className="phone-input-preview">
-        Will send SMS to <strong>{preview || '—'}</strong>
+        SMS will go to <strong>{preview || '—'}</strong>
       </p>
     </div>
   );
