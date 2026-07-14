@@ -20,9 +20,16 @@ export default function AdminDashboard() {
   const [secretCode, setSecretCode] = useState('');
   const [verified, setVerified] = useState(null);
   const [notifyResult, setNotifyResult] = useState(null);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [pageError, setPageError] = useState('');
+  const [notifyError, setNotifyError] = useState('');
+  const [notifyMessage, setNotifyMessage] = useState('');
+  const [verifyError, setVerifyError] = useState('');
+  const [verifyMessage, setVerifyMessage] = useState('');
+  const [queueError, setQueueError] = useState('');
+  const [queueMessage, setQueueMessage] = useState('');
+  const [notifyBusy, setNotifyBusy] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [queueBusy, setQueueBusy] = useState(false);
   const [lastSynced, setLastSynced] = useState(null);
 
   const load = useCallback(async () => {
@@ -48,24 +55,23 @@ export default function AdminDashboard() {
         if (prev) return prev;
         return d?.campus?.default_daily_batch_size || 20;
       });
-      setError('');
+      setPageError('');
     } catch (err) {
-      setError(err.message);
+      setPageError(err.message);
     }
   }, [status, search]);
 
   useEffect(() => {
     load();
-    // Live counts: refresh when students join or leave
     const id = setInterval(load, 10000);
     return () => clearInterval(id);
   }, [load]);
 
   async function notifyBatch(e) {
     e.preventDefault();
-    setBusy(true);
-    setError('');
-    setMessage('');
+    setNotifyBusy(true);
+    setNotifyError('');
+    setNotifyMessage('');
     try {
       const data = await api('/admin/notify/', {
         method: 'POST',
@@ -76,48 +82,54 @@ export default function AdminDashboard() {
         },
       });
       setNotifyResult(data);
-      setMessage(data.message || `Notified ${data.notified_count} student(s).`);
+      setNotifyMessage(data.message || `Notified ${data.notified_count} student(s).`);
       if (data.shortage) {
-        setError(
+        setNotifyError(
           `Only ${data.available} student(s) were waiting (you asked for ${data.requested}). All remaining waiters were notified.`
         );
       }
       await load();
     } catch (err) {
-      setError(err.message);
+      setNotifyError(err.message || 'Could not send notifications.');
     } finally {
-      setBusy(false);
+      setNotifyBusy(false);
     }
   }
 
   async function verifyCode(e) {
     e.preventDefault();
-    setBusy(true);
-    setError('');
-    setMessage('');
+    setVerifyBusy(true);
+    setVerifyError('');
+    setVerifyMessage('');
+    setVerified(null);
     try {
       const data = await api('/admin/verify-code/', {
         method: 'POST',
         body: { secret_code: secretCode.trim().toUpperCase() },
       });
       setVerified(data);
-      setMessage(data.message || 'Identity confirmed.');
+      setVerifyMessage(data.message || 'Identity confirmed.');
       if (data.counts) {
         setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
       }
       await load();
     } catch (err) {
-      setError(err.message || 'Invalid secret code.');
+      const detail =
+        err?.data?.detail ||
+        err.message ||
+        'Invalid or already-used secret code.';
+      setVerifyError(String(detail));
       setVerified(null);
+      setVerifyMessage('');
     } finally {
-      setBusy(false);
+      setVerifyBusy(false);
     }
   }
 
   async function complete(decision) {
     if (!verified?.entry?.id) return;
-    setBusy(true);
-    setError('');
+    setVerifyBusy(true);
+    setVerifyError('');
     try {
       const data = await api('/admin/complete-verification/', {
         method: 'POST',
@@ -127,7 +139,7 @@ export default function AdminDashboard() {
           notes: '',
         },
       });
-      setMessage(data.message || `Marked as ${decision}.`);
+      setVerifyMessage(data.message || `Marked as ${decision}.`);
       if (data.counts) {
         setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
       }
@@ -135,15 +147,16 @@ export default function AdminDashboard() {
       setSecretCode('');
       await load();
     } catch (err) {
-      setError(err.message);
+      setVerifyError(err.message || 'Could not complete verification.');
     } finally {
-      setBusy(false);
+      setVerifyBusy(false);
     }
   }
 
   async function rescheduleEntry(queueEntryId, nextDate) {
-    setBusy(true);
-    setError('');
+    setQueueBusy(true);
+    setQueueError('');
+    setQueueMessage('');
     try {
       const data = await api('/admin/reschedule/', {
         method: 'POST',
@@ -152,12 +165,12 @@ export default function AdminDashboard() {
           scheduled_date: nextDate,
         },
       });
-      setMessage(data.message || 'Rescheduled.');
+      setQueueMessage(data.message || 'Rescheduled.');
       await load();
     } catch (err) {
-      setError(err.message);
+      setQueueError(err.message);
     } finally {
-      setBusy(false);
+      setQueueBusy(false);
     }
   }
 
@@ -165,19 +178,20 @@ export default function AdminDashboard() {
     const name = row.student?.full_name || row.student?.registration_number || 'student';
     const ok = window.confirm(`Remove ${name} from the queue?`);
     if (!ok) return;
-    setBusy(true);
-    setError('');
+    setQueueBusy(true);
+    setQueueError('');
+    setQueueMessage('');
     try {
       const data = await api('/admin/remove-from-queue/', {
         method: 'POST',
         body: { queue_entry_id: row.id },
       });
-      setMessage(data.message || 'Removed from queue.');
+      setQueueMessage(data.message || 'Removed from queue.');
       await load();
     } catch (err) {
-      setError(err.message);
+      setQueueError(err.message);
     } finally {
-      setBusy(false);
+      setQueueBusy(false);
     }
   }
 
@@ -193,15 +207,21 @@ export default function AdminDashboard() {
                 Live · {lastSynced.toLocaleTimeString()}
               </span>
             )}
-            <button type="button" className="btn btn-primary" onClick={load} disabled={busy}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={load}
+              disabled={notifyBusy || verifyBusy || queueBusy}
+            >
               Refresh
             </button>
           </div>
         }
       />
 
-      <Alert>{error}</Alert>
-      <Alert variant="info">{message}</Alert>
+      <Alert>{pageError}</Alert>
+      <Alert>{queueError}</Alert>
+      <Alert variant="info">{!queueError ? queueMessage : ''}</Alert>
       <AdminStats counts={dash?.counts} />
       <AnalyticsBreakdown
         byFaculty={dash?.by_faculty}
@@ -214,8 +234,10 @@ export default function AdminDashboard() {
           batchSize={batchSize}
           scheduledDate={scheduledDate}
           channel={channel}
-          busy={busy}
+          busy={notifyBusy}
           remaining={dash?.counts?.remaining ?? dash?.counts?.waiting ?? 0}
+          error={notifyError}
+          message={notifyMessage}
           onBatchSizeChange={setBatchSize}
           onScheduledDateChange={setScheduledDate}
           onChannelChange={setChannel}
@@ -224,14 +246,20 @@ export default function AdminDashboard() {
         <VerifyCodePanel
           secretCode={secretCode}
           verified={verified}
-          busy={busy}
-          onSecretCodeChange={setSecretCode}
+          busy={verifyBusy}
+          error={verifyError}
+          message={verifyMessage}
+          onSecretCodeChange={(value) => {
+            setSecretCode(value);
+            if (verifyError) setVerifyError('');
+          }}
           onVerify={verifyCode}
           onComplete={complete}
           onClear={() => {
             setVerified(null);
             setSecretCode('');
-            setMessage('');
+            setVerifyError('');
+            setVerifyMessage('');
           }}
         />
       </div>
@@ -241,7 +269,7 @@ export default function AdminDashboard() {
         queue={queue}
         status={status}
         search={search}
-        busy={busy}
+        busy={queueBusy}
         onStatusChange={setStatus}
         onSearchChange={setSearch}
         onReschedule={rescheduleEntry}

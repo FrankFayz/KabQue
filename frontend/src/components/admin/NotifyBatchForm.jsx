@@ -1,4 +1,5 @@
 import Panel from '../ui/Panel';
+import Alert from '../ui/Alert';
 
 export default function NotifyBatchForm({
   batchSize,
@@ -6,6 +7,8 @@ export default function NotifyBatchForm({
   channel,
   busy,
   remaining = 0,
+  error,
+  message,
   onBatchSizeChange,
   onScheduledDateChange,
   onChannelChange,
@@ -32,6 +35,7 @@ export default function NotifyBatchForm({
             value={batchSize}
             onChange={(e) => onBatchSizeChange(e.target.value)}
             required
+            disabled={busy}
           />
         </label>
 
@@ -53,16 +57,25 @@ export default function NotifyBatchForm({
             min={new Date().toISOString().slice(0, 10)}
             onChange={(e) => onScheduledDateChange(e.target.value)}
             required
+            disabled={busy}
           />
         </label>
         <label>
           Channel
-          <select value={channel} onChange={(e) => onChannelChange(e.target.value)}>
+          <select
+            value={channel}
+            onChange={(e) => onChannelChange(e.target.value)}
+            disabled={busy}
+          >
             <option value="both">Email & SMS</option>
             <option value="email">Email only</option>
             <option value="sms">SMS only</option>
           </select>
         </label>
+
+        <Alert>{error}</Alert>
+        <Alert variant="info">{!error ? message : ''}</Alert>
+
         <button className="btn btn-primary" disabled={busy || noneWaiting}>
           {busy ? 'Sending…' : 'Send notifications'}
         </button>

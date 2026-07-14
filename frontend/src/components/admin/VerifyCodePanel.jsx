@@ -1,10 +1,13 @@
 import StatusPill from '../ui/StatusPill';
 import Panel from '../ui/Panel';
+import Alert from '../ui/Alert';
 
 export default function VerifyCodePanel({
   secretCode,
   verified,
   busy,
+  error,
+  message,
   onSecretCodeChange,
   onVerify,
   onComplete,
@@ -31,6 +34,8 @@ export default function VerifyCodePanel({
             required
           />
         </label>
+        <Alert>{error}</Alert>
+        <Alert variant="info">{!error ? message : ''}</Alert>
         <button className="btn btn-primary" disabled={busy || !secretCode.trim()}>
           {busy ? 'Checking…' : 'Confirm identity'}
         </button>

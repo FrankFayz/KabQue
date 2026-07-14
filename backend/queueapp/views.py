@@ -774,7 +774,7 @@ class VerifyCodeView(APIView):
         if not entry or not entry.secret_code:
             return Response(
                 {
-                    "detail": "Invalid secret code. No fresher matched.",
+                    "detail": "Invalid secret code. No fresher matched in the system.",
                     "valid": False,
                 },
                 status=status.HTTP_404_NOT_FOUND,
@@ -783,7 +783,7 @@ class VerifyCodeView(APIView):
         if entry.status == QueueEntry.Status.WAITING:
             return Response(
                 {
-                    "detail": "This student has not been notified yet.",
+                    "detail": "This code belongs to a fresher who has not been notified yet. Notify them first.",
                     "valid": False,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -793,9 +793,13 @@ class VerifyCodeView(APIView):
             QueueEntry.Status.APPROVED,
             QueueEntry.Status.REJECTED,
         ):
+            label = "approved" if entry.status == QueueEntry.Status.APPROVED else "rejected"
             return Response(
                 {
-                    "detail": f"This visit is already marked as {entry.status}.",
+                    "detail": (
+                        f"This secret code has already been used. "
+                        f"The visit was already marked as {label}."
+                    ),
                     "valid": False,
                     "entry": AdminQueueEntrySerializer(entry).data,
                 },
