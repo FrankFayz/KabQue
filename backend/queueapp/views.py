@@ -622,6 +622,8 @@ class NotifyBatchView(APIView):
         )
 
         results = []
+        email_ok = 0
+        email_fail = 0
         now = timezone.now()
         for entry in entries:
             code = entry.assign_secret_code()
@@ -652,6 +654,10 @@ class NotifyBatchView(APIView):
                 ok, err = send_email_notification(
                     entry.student.user.email, subject, body
                 )
+                if ok:
+                    email_ok += 1
+                else:
+                    email_fail += 1
                 NotificationLog.objects.create(
                     batch=batch,
                     queue_entry=entry,
@@ -681,6 +687,7 @@ class NotifyBatchView(APIView):
                     "position": entry.position,
                     "registration_number": entry.student.registration_number,
                     "full_name": entry.student.full_name,
+                    "email": entry.student.user.email or "",
                     "secret_code": code,
                     "scheduled_date": scheduled_date.isoformat(),
                     "channels": channels_tried,
@@ -699,6 +706,10 @@ class NotifyBatchView(APIView):
                 f"Notified {len(results)} student(s) in queue order. "
                 f"{remaining} remaining to notify."
             )
+        if channel in ("email", "both"):
+            message += f" Emails sent: {email_ok}."
+            if email_fail:
+                message += f" Email failures: {email_fail} (check student emails / Brevo sender)."
 
         return Response(
             {
@@ -707,6 +718,8 @@ class NotifyBatchView(APIView):
                 "requested": requested,
                 "available": available,
                 "notified_count": len(results),
+                "emails_sent": email_ok,
+                "emails_failed": email_fail,
                 "shortage": shortage,
                 "remaining": remaining,
                 "students": results,

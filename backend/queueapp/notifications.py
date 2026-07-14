@@ -1,4 +1,8 @@
+import json
 import logging
+import re
+import urllib.error
+import urllib.request
 
 from django.conf import settings
 from django.core.mail import send_mail
@@ -27,9 +31,74 @@ def build_approval_message(
     )
 
 
+def _parse_from_email(value: str) -> tuple[str, str]:
+    """Return (name, email) from 'Name <email@x.com>' or bare email."""
+    value = (value or "").strip()
+    match = re.match(r"^(.*?)\s*<([^>]+)>$", value)
+    if match:
+        name = match.group(1).strip().strip('"') or "KabQue"
+        return name, match.group(2).strip()
+    if "@" in value:
+        return "KabQue", value
+    return "KabQue", value
+
+
+def _sender_identity() -> tuple[str, str]:
+    name = (getattr(settings, "BREVO_SENDER_NAME", "") or "").strip() or "KabQue"
+    email = (getattr(settings, "BREVO_SENDER_EMAIL", "") or "").strip()
+    if email:
+        return name, email
+    return _parse_from_email(settings.DEFAULT_FROM_EMAIL)
+
+
+def _send_via_brevo(to_email: str, subject: str, body: str) -> tuple[bool, str]:
+    api_key = (getattr(settings, "BREVO_API_KEY", "") or "").strip()
+    if not api_key:
+        return False, "BREVO_API_KEY not configured"
+
+    sender_name, sender_email = _sender_identity()
+    if not sender_email or "@" not in sender_email:
+        return False, "BREVO_SENDER_EMAIL is missing or invalid"
+
+    payload = {
+        "sender": {"name": sender_name, "email": sender_email},
+        "to": [{"email": to_email.strip()}],
+        "subject": subject,
+        "textContent": body,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=data,
+        headers={
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            resp.read()
+        return True, ""
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        logger.error("Brevo email failed (%s): %s", exc.code, detail)
+        return False, f"Brevo HTTP {exc.code}: {detail}"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Brevo email failed")
+        return False, str(exc)
+
+
 def send_email_notification(to_email: str, subject: str, body: str) -> tuple[bool, str]:
+    to_email = (to_email or "").strip()
     if not to_email:
-        return False, "No email address"
+        return False, "No email address on student profile"
+
+    # Prefer Brevo API when configured (production)
+    if (getattr(settings, "BREVO_API_KEY", "") or "").strip():
+        return _send_via_brevo(to_email, subject, body)
+
     try:
         send_mail(
             subject=subject,
@@ -56,9 +125,6 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
 
     if username and api_key:
         try:
-            import urllib.request
-            import json
-
             data = json.dumps(
                 {
                     "username": username,

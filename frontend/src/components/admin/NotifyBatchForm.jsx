@@ -58,8 +58,8 @@ export default function NotifyBatchForm({
         <label>
           Channel
           <select value={channel} onChange={(e) => onChannelChange(e.target.value)}>
-            <option value="both">Email & SMS</option>
             <option value="email">Email only</option>
+            <option value="both">Email & SMS</option>
             <option value="sms">SMS only</option>
           </select>
         </label>

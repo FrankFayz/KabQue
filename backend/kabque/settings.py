@@ -160,6 +160,11 @@ EMAIL_BACKEND = os.getenv(
 )
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "KabQue <noreply@kabale.ac.ug>")
 
+# Brevo (Sendinblue) transactional email — used when BREVO_API_KEY is set
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
+BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "")
+BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "KabQue")
+
 CAMPUS_LATITUDE = float(os.getenv("CAMPUS_LATITUDE", "1.373333"))
 CAMPUS_LONGITUDE = float(os.getenv("CAMPUS_LONGITUDE", "32.290275"))
 CAMPUS_RADIUS_METERS = float(os.getenv("CAMPUS_RADIUS_METERS", "500000"))
