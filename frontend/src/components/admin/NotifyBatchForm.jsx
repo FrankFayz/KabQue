@@ -77,8 +77,8 @@ export default function NotifyBatchForm({
           </select>
         </label>
         <p className="hint">
-          SMS needs: (1) MYSMSGATE_API_KEY on Render, (2) MySMSGate Android app online
-          on the same account, (3) student phone with country code like +2567…
+          SMS uses the student profile phone (+256…). Server needs a valid
+          MYSMSGATE_API_KEY on Render; keep the MySMSGate app online.
         </p>
 
         <Alert>{error}</Alert>

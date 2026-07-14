@@ -3,8 +3,10 @@ import Alert from '../ui/Alert';
 
 function deliveryLabel(channel) {
   if (!channel) return null;
-  if (channel.success) return `${channel.channel.toUpperCase()} sent`;
-  return `${channel.channel.toUpperCase()} failed: ${channel.error || 'error'}`;
+  if (channel.success) return `${channel.channel.toUpperCase()} ok`;
+  const err = (channel.error || 'failed').trim();
+  const short = err.length > 42 ? `${err.slice(0, 40)}…` : err;
+  return `${channel.channel.toUpperCase()}: ${short}`;
 }
 
 export default function BatchResultTable({ result }) {
@@ -12,24 +14,18 @@ export default function BatchResultTable({ result }) {
   if (!result || !students.length) return null;
 
   const smsFailed = Number(result.sms_failed || 0) > 0;
-  const smsHint =
-    (Array.isArray(result.sms_errors) && result.sms_errors[0]) ||
-    'Keep the MySMSGate Android app online with the same account as the API key on Render. Student phones must include country code (+256…).';
+  const smsCode =
+    (Array.isArray(result.sms_errors) && result.sms_errors[0]) || 'SMS send failed';
 
   return (
     <Panel title="Last batch notified">
       <Alert variant="info">{result.message || ''}</Alert>
       {result.shortage ? (
         <Alert>
-          Requested {result.requested}, but only {result.available} were waiting —
-          all remaining waiters were notified.
+          Requested {result.requested}, only {result.available} were waiting — all were notified.
         </Alert>
       ) : null}
-      {smsFailed ? (
-        <Alert>
-          SMS did not send for {result.sms_failed} student(s). {smsHint}
-        </Alert>
-      ) : null}
+      {smsFailed ? <Alert>SMS failed ({result.sms_failed}): {smsCode}</Alert> : null}
       <div className="batch-summary">
         <span>
           Notified <strong>{result.notified_count}</strong>

@@ -157,12 +157,10 @@ def _parse_mysmsgate_error(raw: str, fallback: str = "MySMSGate request failed")
 
 
 def _mysmsgate_hint(status_code: int, detail: str) -> str:
+    """Short operator-facing codes (not long browser essays)."""
     lower = (detail or "").lower()
     if status_code in (401, 403) or "unauthorized" in lower or "invalid api" in lower:
-        return (
-            "MySMSGate rejected the API key. Put the same API key from the MySMSGate "
-            "dashboard into Render as MYSMSGATE_API_KEY, then redeploy."
-        )
+        return "Invalid MySMSGate API key on server"
     if (
         status_code in (404, 409, 422, 503)
         or "no device" in lower
@@ -170,26 +168,18 @@ def _mysmsgate_hint(status_code: int, detail: str) -> str:
         or "not connected" in lower
         or "no online" in lower
     ):
-        return (
-            "No online Android device for this MySMSGate account. Open the MySMSGate "
-            "app on your phone, sign in with the same account as the API key, and keep "
-            "the phone online."
-        )
+        return "MySMSGate device offline"
     if "phone" in lower or "number" in lower or "invalid to" in lower:
-        return (
-            "Recipient phone was rejected. Student numbers must look like +2567XXXXXXX "
-            "(country code included)."
-        )
-    return detail or "MySMSGate could not send the SMS."
+        return "Invalid recipient phone"
+    if detail:
+        return detail[:120]
+    return "SMS send failed"
 
 
 def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
     if not api_key:
-        return False, (
-            "MYSMSGATE_API_KEY is not set on the server. Add it in Render Environment "
-            "(from your MySMSGate dashboard), then redeploy."
-        )
+        return False, "MySMSGate API key missing on server"
 
     if not to_phone.startswith("+"):
         return False, f"Phone must start with country code (+…), got: {to_phone}"
@@ -211,7 +201,7 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     # Always try without a pinned device (uses first online device on the account)
     attempts.append({})
 
-    last_error = "MySMSGate SMS failed"
+    last_error = "SMS send failed"
     for extra in attempts:
         payload = {**base_payload, **extra}
         if sim_slot is not None and str(sim_slot).strip() != "":
@@ -257,11 +247,10 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
             logger.error(
                 "MySMSGate SMS failed to %s (%s): %s", to_phone, exc.code, detail
             )
-            # Retry without device_id if pinned device failed
             continue
         except Exception as exc:  # noqa: BLE001
             logger.exception("MySMSGate SMS failed to %s", to_phone)
-            last_error = str(exc)
+            last_error = str(exc)[:120]
             continue
 
     return False, last_error
@@ -271,12 +260,9 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
     """Send SMS via MySMSGate to the student's profile phone (E.164 +country)."""
     to_phone = normalize_phone(phone)
     if not to_phone:
-        return False, "No phone number on student profile"
+        return False, "No phone on student profile"
     if not to_phone.startswith("+"):
-        return False, (
-            "Phone number must include a country code (e.g. +256…). "
-            "Ask the student to update their telephone on the profile form."
-        )
+        return False, "Student phone needs country code (+256…)"
 
     if (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip():
         return _send_via_mysmsgate(to_phone, body)
@@ -308,9 +294,6 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
             return True, ""
         except Exception as exc:  # noqa: BLE001
             logger.exception("SMS send failed")
-            return False, str(exc)
+            return False, str(exc)[:120]
 
-    return False, (
-        "SMS provider not configured. Set MYSMSGATE_API_KEY on Render "
-        "(MySMSGate dashboard → API key), keep the Android app online, then redeploy."
-    )
+    return False, "MySMSGate API key missing on server"

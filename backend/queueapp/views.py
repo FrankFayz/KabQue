@@ -783,17 +783,13 @@ class NotifyBatchView(APIView):
                 f"{remaining} remaining to notify."
             )
         if channel in ("email", "both"):
-            message += f" Emails sent: {email_ok}."
+            message += f" Emails: {email_ok}."
             if email_fail:
-                message += f" Email failures: {email_fail}."
+                message += f" Email failed: {email_fail}."
         if channel in ("sms", "both"):
-            message += f" SMS sent: {sms_ok}."
+            message += f" SMS: {sms_ok}."
             if sms_fail:
-                hint = sms_errors[0] if sms_errors else (
-                    "Check student phone (+country code) and that the MySMSGate "
-                    "Android app is online with the same account as MYSMSGATE_API_KEY on Render."
-                )
-                message += f" SMS failures: {sms_fail}. Reason: {hint}"
+                message += f" SMS failed: {sms_fail}."
 
         return Response(
             {
@@ -806,7 +802,7 @@ class NotifyBatchView(APIView):
                 "emails_failed": email_fail,
                 "sms_sent": sms_ok,
                 "sms_failed": sms_fail,
-                "sms_errors": sms_errors,
+                "sms_errors": sms_errors[:3],
                 "sms_configured": bool(
                     (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
                 ),

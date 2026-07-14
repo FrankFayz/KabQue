@@ -82,10 +82,19 @@ export default function AdminDashboard() {
         },
       });
       setNotifyResult(data);
-      setNotifyMessage(data.message || `Notified ${data.notified_count} student(s).`);
+      // Keep the notify form alert short; full batch details render below.
+      if (data.sms_failed) {
+        setNotifyMessage(
+          `Batch sent. Emails ${data.emails_sent ?? 0}, SMS failed ${data.sms_failed}.`
+        );
+      } else {
+        setNotifyMessage(
+          `Batch sent. Notified ${data.notified_count}, emails ${data.emails_sent ?? 0}, SMS ${data.sms_sent ?? 0}.`
+        );
+      }
       if (data.shortage) {
         setNotifyError(
-          `Only ${data.available} student(s) were waiting (you asked for ${data.requested}). All remaining waiters were notified.`
+          `Only ${data.available} waiting (you asked for ${data.requested}); all remaining were notified.`
         );
       }
       await load();
