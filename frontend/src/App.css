@@ -868,6 +868,22 @@ textarea:focus {
   color: var(--kab-blue);
 }
 
+.pos-pending {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  color: var(--muted);
+}
+
+.queue-pending-note {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 114, 187, 0.18);
+  background: #f3f8fc;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
 .label {
   display: block;
   font-size: 0.78rem;
@@ -1574,6 +1590,13 @@ th {
   font-size: clamp(1.2rem, 2vw, 1.45rem);
   font-weight: 700;
   color: var(--kab-blue);
+}
+
+.queue-card-pos.is-queued {
+  color: var(--muted);
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .queue-card-identity {

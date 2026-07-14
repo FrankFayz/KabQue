@@ -68,7 +68,12 @@ class QueueEntry(models.Model):
     student = models.OneToOneField(
         StudentProfile, on_delete=models.CASCADE, related_name="queue_entry"
     )
-    position = models.PositiveIntegerField(db_index=True)
+    position = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Batch queue number assigned when the supervisor notifies a day batch.",
+    )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.WAITING, db_index=True
     )
@@ -82,11 +87,12 @@ class QueueEntry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["position"]
+        ordering = ["created_at", "id"]
         verbose_name_plural = "Queue entries"
 
     def __str__(self) -> str:
-        return f"#{self.position} {self.student.registration_number} ({self.status})"
+        label = f"#{self.position}" if self.position else "queued"
+        return f"{label} {self.student.registration_number} ({self.status})"
 
     def assign_secret_code(self) -> str:
         self.secret_code = generate_secret_code()

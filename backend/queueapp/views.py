@@ -73,12 +73,18 @@ def get_queue_entry(profile):
 
 
 def renumber_queue_positions():
-    entries = list(QueueEntry.objects.order_by("position", "id"))
-    for index, entry in enumerate(entries, start=1):
-        if entry.position != index:
-            entry.position = index
-            entry.save(update_fields=["position", "updated_at"])
+    """No-op: batch numbers are fixed at notify time and must not reshuffle."""
+    return
 
+
+def waiting_ahead_count(entry) -> int:
+    """How many waiters joined before this student (arrival order)."""
+    if entry.status != QueueEntry.Status.WAITING:
+        return 0
+    return QueueEntry.objects.filter(
+        status=QueueEntry.Status.WAITING,
+        created_at__lt=entry.created_at,
+    ).count()
 
 def can_reschedule_entry(entry) -> bool:
     if entry.status in (
@@ -368,14 +374,12 @@ class StudentQueueStatusView(APIView):
                     "profile": profile_payload(profile, request),
                 }
             )
-        ahead = QueueEntry.objects.filter(
-            position__lt=entry.position,
-            status=QueueEntry.Status.WAITING,
-        ).count()
+        ahead = waiting_ahead_count(entry)
         payload = QueueEntrySerializer(entry, context={"request": request}).data
         payload["in_queue"] = True
         payload["profile_complete"] = profile.is_profile_complete
         payload["students_ahead_waiting"] = ahead
+        payload["has_batch_number"] = entry.position is not None
         return Response(payload)
 
 
@@ -447,20 +451,19 @@ class JoinQueueView(APIView):
             ]
         )
 
-        last = QueueEntry.objects.select_for_update().order_by("-position").first()
-        position = (last.position + 1) if last else 1
-        entry = QueueEntry.objects.create(student=profile, position=position)
+        # Join only — no batch number yet. Numbers are assigned when supervisor notifies.
+        entry = QueueEntry.objects.create(student=profile, position=None)
 
         payload = QueueEntrySerializer(entry, context={"request": request}).data
         payload["in_queue"] = True
-        payload["students_ahead_waiting"] = QueueEntry.objects.filter(
-            position__lt=entry.position,
-            status=QueueEntry.Status.WAITING,
-        ).count()
+        payload["students_ahead_waiting"] = waiting_ahead_count(entry)
+        payload["has_batch_number"] = False
         return Response(
             {
                 "message": (
-                    f"You have joined the KabQue priority queue at position #{position}."
+                    "You have joined the KabQue priority queue. "
+                    "Your queue number will appear when the supervisor notifies "
+                    "your approval batch."
                 ),
                 "queue": payload,
             },
@@ -586,7 +589,11 @@ class AdminQueueListView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
-        qs = QueueEntry.objects.select_related("student", "student__user").all()
+        qs = (
+            QueueEntry.objects.select_related("student", "student__user")
+            .all()
+            .order_by("created_at", "id")
+        )
         status_filter = request.query_params.get("status")
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -601,7 +608,10 @@ class AdminQueueListView(APIView):
 
 
 class NotifyBatchView(APIView):
-    """Notify the next waiting students in first-come-first-served order (by position)."""
+    """
+    Notify the next waiting students in arrival order (first come, first served).
+    Assigns batch queue numbers 1…N for the size the supervisor requests.
+    """
 
     permission_classes = [IsQueueAdmin]
 
@@ -617,7 +627,7 @@ class NotifyBatchView(APIView):
             QueueEntry.objects.select_for_update()
             .select_related("student", "student__user")
             .filter(status=QueueEntry.Status.WAITING)
-            .order_by("position", "created_at", "id")
+            .order_by("created_at", "id")
         )
         available = waiting_qs.count()
         if available == 0:
@@ -648,17 +658,19 @@ class NotifyBatchView(APIView):
         sms_ok = 0
         sms_fail = 0
         now = timezone.now()
-        for entry in entries:
+        for batch_number, entry in enumerate(entries, start=1):
             code = entry.assign_secret_code()
             entry.status = QueueEntry.Status.NOTIFIED
             entry.scheduled_date = scheduled_date
             entry.notified_at = now
+            entry.position = batch_number
             entry.save(
                 update_fields=[
                     "secret_code",
                     "status",
                     "scheduled_date",
                     "notified_at",
+                    "position",
                     "updated_at",
                 ]
             )
@@ -668,14 +680,14 @@ class NotifyBatchView(APIView):
                 registration_number=entry.student.registration_number,
                 scheduled_date=scheduled_date,
                 secret_code=code,
-                position=entry.position,
+                position=batch_number,
             )
             sms_body = build_approval_sms(
                 full_name=entry.student.full_name,
                 registration_number=entry.student.registration_number,
                 scheduled_date=scheduled_date,
                 secret_code=code,
-                position=entry.position,
+                position=batch_number,
             )
             subject = f"KabQue: Document approval on {scheduled_date.isoformat()}"
 
@@ -719,7 +731,7 @@ class NotifyBatchView(APIView):
 
             results.append(
                 {
-                    "position": entry.position,
+                    "position": batch_number,
                     "registration_number": entry.student.registration_number,
                     "full_name": entry.student.full_name,
                     "email": entry.student.user.email or "",
@@ -736,12 +748,13 @@ class NotifyBatchView(APIView):
         if shortage:
             message = (
                 f"Only {available} student(s) were waiting. "
-                f"Notified all {len(results)} remaining (you requested {requested}). "
-                f"{remaining} still waiting."
+                f"Assigned queue numbers 1–{len(results)} and notified them "
+                f"(you requested {requested}). {remaining} still waiting."
             )
         else:
             message = (
-                f"Notified {len(results)} student(s) in queue order. "
+                f"Assigned queue numbers 1–{len(results)} to the next "
+                f"{len(results)} student(s) in arrival order and notified them. "
                 f"{remaining} remaining to notify."
             )
         if channel in ("email", "both"):

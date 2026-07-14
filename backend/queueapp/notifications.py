@@ -33,7 +33,7 @@ def build_approval_message(
         f"Dear {full_name},\n\n"
         f"KabQue — Kabale University document approval notice.\n\n"
         f"Registration number: {registration_number}\n"
-        f"Queue position: {position}\n"
+        f"Queue number for your approval day: {position}\n"
         f"Please prepare and report for document approval on: {date_str}.\n\n"
         f"Your SECRET CODE (show this to the admin): {secret_code}\n\n"
         f"Bring all required documents. Do not share your secret code.\n\n"
@@ -53,7 +53,7 @@ def build_approval_sms(
     first = (full_name or "student").strip().split()[0]
     return (
         f"KabQue: Hi {first}, report for document approval on {date_str}. "
-        f"Reg {registration_number}, queue #{position}. "
+        f"Reg {registration_number}, queue number #{position}. "
         f"SECRET CODE: {secret_code}. Do not share. — Kabale University"
     )
 

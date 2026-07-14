@@ -22,6 +22,9 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
   const [date, setDate] = useState(() => queue?.scheduled_date || tomorrowISO());
   const [localError, setLocalError] = useState('');
   const manage = canManageAssignment(queue);
+  const hasBatchNumber =
+    queue?.has_batch_number === true ||
+    (queue?.position != null && queue?.status !== 'waiting');
 
   useEffect(() => {
     setDate(queue?.scheduled_date || tomorrowISO());
@@ -58,15 +61,31 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
   return (
     <div className="status-board">
       <div className="status-hero">
-        <span className="label">Your position</span>
-        <strong className="pos">#{queue.position}</strong>
+        <span className="label">
+          {hasBatchNumber ? 'Your queue number' : 'Queue status'}
+        </span>
+        {hasBatchNumber ? (
+          <strong className="pos">#{queue.position}</strong>
+        ) : (
+          <strong className="pos pos-pending">Pending</strong>
+        )}
         <StatusPill status={queue.status} />
       </div>
+
+      {!hasBatchNumber ? (
+        <p className="queue-pending-note">
+          You are in the priority queue. Your number will be assigned when the
+          supervisor notifies the next approval batch (in arrival order).
+        </p>
+      ) : null}
+
       <div className="status-grid">
-        <div>
-          <span className="label">Waiting ahead</span>
-          <strong>{queue.students_ahead_waiting ?? '—'}</strong>
-        </div>
+        {queue.status === 'waiting' ? (
+          <div>
+            <span className="label">Waiting ahead</span>
+            <strong>{queue.students_ahead_waiting ?? '—'}</strong>
+          </div>
+        ) : null}
         <div>
           <span className="label">Scheduled day</span>
           <strong>{queue.scheduled_date || 'Not assigned yet'}</strong>

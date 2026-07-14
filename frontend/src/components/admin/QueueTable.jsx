@@ -40,7 +40,13 @@ export default function QueueTable({
   const [dates, setDates] = useState({});
 
   const ordered = useMemo(
-    () => [...queue].sort((a, b) => a.position - b.position || a.id - b.id),
+    () =>
+      [...queue].sort((a, b) => {
+        const aTime = new Date(a.created_at || 0).getTime();
+        const bTime = new Date(b.created_at || 0).getTime();
+        if (aTime !== bTime) return aTime - bTime;
+        return (a.id || 0) - (b.id || 0);
+      }),
     [queue]
   );
 
@@ -75,9 +81,8 @@ export default function QueueTable({
           <p className="queue-opener-kicker">Live queue</p>
           <h2>Browse students in order</h2>
           <p>
-            First-come first-served. Open the queue to review students in order.
-            After you approve or reject with a secret code, they leave the queue
-            automatically.
+            First-come first-served by arrival time. Numbers appear only after a
+            batch is notified. Approve/reject then removes them automatically.
           </p>
           <dl className="queue-opener-meta">
             <div>
@@ -145,7 +150,15 @@ export default function QueueTable({
           {pageRows.map((row) => (
             <li key={row.id} className="queue-card">
               <div className="queue-card-top">
-                <span className="queue-card-pos">#{row.position}</span>
+                <span
+                  className={`queue-card-pos${
+                    row.position != null && row.status !== 'waiting' ? '' : ' is-queued'
+                  }`}
+                >
+                  {row.position != null && row.status !== 'waiting'
+                    ? `#${row.position}`
+                    : 'Queued'}
+                </span>
                 <StatusPill status={row.status} />
               </div>
 

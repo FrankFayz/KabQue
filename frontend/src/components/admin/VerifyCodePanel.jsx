@@ -64,8 +64,12 @@ export default function VerifyCodePanel({
 
           <div className="verify-grid">
             <div>
-              <span className="label">Queue position</span>
-              <strong>#{entry.position}</strong>
+              <span className="label">Queue number</span>
+              <strong>
+                {entry.position != null && entry.status !== 'waiting'
+                  ? `#${entry.position}`
+                  : 'Not assigned yet'}
+              </strong>
             </div>
             <div>
               <span className="label">Faculty</span>

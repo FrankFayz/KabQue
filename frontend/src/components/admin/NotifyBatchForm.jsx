@@ -38,6 +38,10 @@ export default function NotifyBatchForm({
             disabled={busy}
           />
         </label>
+        <p className="hint">
+          The first N students by arrival order get queue numbers 1–N for that
+          approval day, then receive their secret code.
+        </p>
 
         {noneWaiting ? (
           <p className="notify-warn">No students are waiting. Joiners appear here when they enter the queue.</p>

@@ -59,7 +59,11 @@ export default function StudentDashboard() {
         setLastRefreshed(new Date());
         if (manual) {
           if (data?.in_queue) {
-            setInfo(`Queue updated · position #${data.position} · ${data.status}`);
+            const num =
+              data.position != null && data.status !== 'waiting'
+                ? ` · queue #${data.position}`
+                : '';
+            setInfo(`Queue updated · ${data.status}${num}`);
           } else if (!(data?.profile_complete ?? data?.profile?.profile_complete)) {
             setInfo('Complete your profile before joining the queue.');
           } else {
