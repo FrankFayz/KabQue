@@ -1,7 +1,7 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -152,7 +152,11 @@ def apply_reschedule(entry, scheduled_date, *, notify=True):
 
 
 def remove_queue_entry(entry):
+    """Delete live queue row; keep notification logs by nulling their FK first."""
+    NotificationLog.ensure_nullable_queue_entry()
+    NotificationLog.objects.filter(queue_entry_id=entry.id).update(queue_entry=None)
     profile = entry.student
+    entry_id = entry.id
     entry.delete()
     profile.joined_queue_at = None
     profile.save(update_fields=["joined_queue_at"])
@@ -920,10 +924,11 @@ class CompleteVerificationView(APIView):
     def post(self, request):
         serializer = CompleteVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        entry_id = serializer.validated_data["queue_entry_id"]
         entry = (
             QueueEntry.objects.select_related("student", "student__user")
-            .select_for_update()
-            .filter(id=serializer.validated_data["queue_entry_id"])
+            .filter(id=entry_id)
             .first()
         )
         if not entry:
@@ -941,7 +946,6 @@ class CompleteVerificationView(APIView):
             )
 
         decision = serializer.validated_data["decision"]
-        # Ensure they were at least checked in before approve/reject
         if (
             decision in ("approved", "rejected")
             and entry.status
@@ -957,34 +961,50 @@ class CompleteVerificationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        entry.status = decision
-        entry.verified_at = timezone.now()
-        entry.verification_notes = serializer.validated_data.get("notes", "")
-        entry.save(
-            update_fields=["status", "verified_at", "verification_notes", "updated_at"]
-        )
-
+        notes = serializer.validated_data.get("notes", "")
         removed_from_queue = False
-        if decision in ("approved", "rejected"):
-            CampusSettings.ensure_lifetime_columns()
-            campus = CampusSettings.get_solo()
-            if decision == "approved":
-                CampusSettings.objects.filter(pk=campus.pk).update(
-                    lifetime_approved=F("lifetime_approved") + 1
-                )
+        entry_payload = None
+
+        try:
+            if decision in ("approved", "rejected"):
+                # Record desk outcome, then leave the live queue.
+                CampusSettings.ensure_lifetime_columns()
+                campus = CampusSettings.get_solo()
+                if decision == "approved":
+                    campus.lifetime_approved = int(campus.lifetime_approved or 0) + 1
+                    campus.save(update_fields=["lifetime_approved", "updated_at"])
+                else:
+                    campus.lifetime_rejected = int(campus.lifetime_rejected or 0) + 1
+                    campus.save(update_fields=["lifetime_rejected", "updated_at"])
+
+                NotificationLog.ensure_nullable_queue_entry()
+                remove_queue_entry(entry)
+                removed_from_queue = True
             else:
-                CampusSettings.objects.filter(pk=campus.pk).update(
-                    lifetime_rejected=F("lifetime_rejected") + 1
+                entry.status = decision
+                entry.verified_at = timezone.now()
+                entry.verification_notes = notes
+                entry.save(
+                    update_fields=[
+                        "status",
+                        "verified_at",
+                        "verification_notes",
+                        "updated_at",
+                    ]
                 )
-            # Leave live browse automatically — invigilators do not manually delete
-            remove_queue_entry(entry)
-            removed_from_queue = True
-            entry_payload = None
-        else:
-            entry_payload = AdminQueueEntrySerializer(entry).data
+                entry_payload = AdminQueueEntrySerializer(entry).data
+        except Exception:
+            return Response(
+                {
+                    "detail": (
+                        "Could not finalize this student right now. "
+                        "Please refresh and try again."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         counts = build_queue_counts()
-
         labels = {
             "approved": "Approved — documents accepted. Student removed from the live queue.",
             "rejected": "Rejected — documents not accepted. Student removed from the live queue.",

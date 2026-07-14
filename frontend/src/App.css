@@ -2038,6 +2038,185 @@ th {
   gap: 0.85rem;
 }
 
+.profile-setup {
+  display: grid;
+  gap: 1rem;
+  width: 100%;
+}
+
+.profile-setup-hero {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1rem 1.15rem;
+  align-items: center;
+  padding: clamp(1.1rem, 2.5vw, 1.45rem);
+  border-radius: 18px;
+  border: 1px solid rgba(0, 114, 187, 0.16);
+  background:
+    linear-gradient(135deg, rgba(0, 114, 187, 0.1), transparent 42%),
+    linear-gradient(180deg, #fff, #f5f9fd);
+  box-shadow: var(--shadow);
+}
+
+.profile-setup-badge {
+  width: 3.1rem;
+  height: 3.1rem;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--kab-blue);
+  background: rgba(0, 114, 187, 0.1);
+  border: 1px solid rgba(0, 114, 187, 0.18);
+}
+
+.profile-setup-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--kab-blue);
+}
+
+.profile-setup-hero h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.35rem, 2.6vw, 1.7rem);
+  color: var(--kab-blue-ink);
+}
+
+.profile-setup-hero-copy p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 36rem;
+  font-size: 0.95rem;
+}
+
+.profile-setup-reg {
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  min-width: 10rem;
+}
+
+.profile-setup-reg strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  color: var(--kab-blue-ink);
+  word-break: break-all;
+}
+
+.profile-setup-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.profile-setup-block {
+  padding: clamp(1rem, 2vw, 1.25rem);
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(10, 47, 74, 0.03);
+  display: grid;
+  gap: 0.95rem;
+}
+
+.profile-setup-block-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.profile-setup-block-icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--kab-blue);
+  background: rgba(0, 114, 187, 0.08);
+  flex-shrink: 0;
+}
+
+.profile-setup-block-head h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  color: var(--kab-blue-ink);
+}
+
+.profile-setup-block-head p {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.profile-setup-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem 1rem;
+}
+
+.profile-setup-academic {
+  align-items: start;
+}
+
+.profile-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.profile-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--kab-blue-ink);
+}
+
+.profile-field-label svg {
+  color: var(--kab-blue);
+  flex-shrink: 0;
+}
+
+.profile-setup-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.35rem 0.15rem 0.5rem;
+}
+
+.profile-setup-submit {
+  min-width: 12rem;
+}
+
+@media (max-width: 860px) {
+  .profile-setup-hero {
+    grid-template-columns: auto 1fr;
+  }
+
+  .profile-setup-reg {
+    grid-column: 1 / -1;
+  }
+
+  .profile-setup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-setup-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .profile-setup-submit {
+    width: 100%;
+  }
+}
+
 .phone-field {
   display: grid;
   gap: 0.35rem;

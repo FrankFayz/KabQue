@@ -159,8 +159,28 @@ class NotificationLog(models.Model):
     error_message = models.TextField(blank=True)
     sent_at = models.DateTimeField(default=timezone.now)
 
+    _queue_entry_null_ready = False
+
     def __str__(self) -> str:
         return f"{self.channel} → {self.destination}"
+
+    @classmethod
+    def ensure_nullable_queue_entry(cls) -> None:
+        """Allow clearing queue_entry when a fresher leaves after approve/reject."""
+        if cls._queue_entry_null_ready:
+            return
+        from django.db import connection
+
+        table = cls._meta.db_table
+        try:
+            with connection.cursor() as cursor:
+                if connection.vendor == "postgresql":
+                    cursor.execute(
+                        f"ALTER TABLE {table} ALTER COLUMN queue_entry_id DROP NOT NULL"
+                    )
+            cls._queue_entry_null_ready = True
+        except Exception:
+            cls._queue_entry_null_ready = True
 
 
 class CampusSettings(models.Model):
