@@ -590,14 +590,11 @@ class AdminQueueListView(APIView):
         status_filter = request.query_params.get("status")
         if status_filter:
             qs = qs.filter(status=status_filter)
-        search = request.query_params.get("search")
+        search = (request.query_params.get("search") or "").strip()
         if search:
+            # Registration number is the system primary student key — search only on that.
             qs = qs.filter(
-                Q(student__registration_number__icontains=search)
-                | Q(student__full_name__icontains=search)
-                | Q(student__faculty__icontains=search)
-                | Q(student__programme__icontains=search)
-                | Q(secret_code__iexact=search)
+                student__registration_number__icontains=search.upper()
             )
         serializer = AdminQueueEntrySerializer(qs[:500], many=True)
         return Response(serializer.data)

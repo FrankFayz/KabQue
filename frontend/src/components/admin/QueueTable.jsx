@@ -126,8 +126,11 @@ export default function QueueTable({
           </select>
           <input
             value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search name / reg / code"
+            onChange={(e) => onSearchChange(e.target.value.toUpperCase())}
+            placeholder="Search by registration number"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Search by registration number"
           />
         </div>
       </div>
