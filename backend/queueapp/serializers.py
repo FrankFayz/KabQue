@@ -162,9 +162,10 @@ class JoinQueueSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {
                     "location": (
-                        "You should be within Kabale University campus premises "
-                        "to join the queue. Please enter the campus grounds and try again. "
-                        f"(You are about {int(distance)}m away; allowed radius: {int(radius)}m.)"
+                        "You must be inside Uganda to join the KabQue test queue. "
+                        "Turn on GPS and try again. "
+                        f"(You are about {int(distance)}m outside the allowed area; "
+                        f"allowed radius: {int(radius)}m.)"
                     )
                 }
             )

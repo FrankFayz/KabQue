@@ -132,10 +132,12 @@ class NotificationLog(models.Model):
 class CampusSettings(models.Model):
     """Singleton-style campus geofence configuration."""
 
-    name = models.CharField(max_length=100, default="Kabale University Kikungiri")
-    latitude = models.DecimalField(max_digits=10, decimal_places=7, default=-1.272215)
-    longitude = models.DecimalField(max_digits=10, decimal_places=7, default=29.988321)
-    radius_meters = models.PositiveIntegerField(default=800)
+    name = models.CharField(max_length=100, default="Uganda (nationwide testing)")
+    # Geographic centre of Uganda · ~500km radius covers testers nationwide.
+    # Restore Kabale Kikungiri (-1.272215, 29.988321, 800m) for production.
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, default=1.373333)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, default=32.290275)
+    radius_meters = models.PositiveIntegerField(default=500000)
     gps_enforcement = models.BooleanField(default=True)
     default_daily_batch_size = models.PositiveIntegerField(default=50)
     updated_at = models.DateTimeField(auto_now=True)

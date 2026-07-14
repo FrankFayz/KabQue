@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 
@@ -7,7 +8,7 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = "Create KabQue supervisor (@kab.ac.ug) and ensure campus settings exist."
+    help = "Create KabQue supervisor (@kab.ac.ug) and sync campus/GPS settings from env."
 
     def add_arguments(self, parser):
         parser.add_argument("--email", default="admin@kab.ac.ug")
@@ -15,7 +16,20 @@ class Command(BaseCommand):
         parser.add_argument("--full-name", default="KabQue Supervisor")
 
     def handle(self, *args, **options):
-        CampusSettings.get_solo()
+        campus = CampusSettings.get_solo()
+        campus.name = getattr(settings, "CAMPUS_NAME", campus.name)
+        campus.latitude = settings.CAMPUS_LATITUDE
+        campus.longitude = settings.CAMPUS_LONGITUDE
+        campus.radius_meters = int(settings.CAMPUS_RADIUS_METERS)
+        campus.gps_enforcement = settings.GPS_ENFORCEMENT
+        campus.save()
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Campus GPS: {campus.name} @ {campus.latitude}, {campus.longitude} "
+                f"r={campus.radius_meters}m enforce={campus.gps_enforcement}"
+            )
+        )
+
         email = options["email"].strip().lower()
         password = options["password"]
         full_name = options["full_name"].strip()
@@ -49,7 +63,6 @@ class Command(BaseCommand):
             user.save()
             self.stdout.write(self.style.WARNING(f"Updated existing supervisor '{email}'"))
 
-        # Keep legacy username=admin usable if it still exists (migrate email)
         legacy = User.objects.filter(username="admin").exclude(pk=user.pk).first()
         if legacy:
             legacy.email = email
