@@ -1,0 +1,871 @@
+from django.contrib.auth import authenticate, get_user_model
+from django.db import transaction
+from django.db.models import Count, Q
+from django.utils import timezone
+from rest_framework import permissions, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from .models import CampusSettings, NotificationBatch, NotificationLog, QueueEntry, StudentProfile
+from .notifications import (
+    build_approval_message,
+    send_email_notification,
+    send_sms_notification,
+)
+from .auth_utils import is_kab_university_email, kab_email_error_message, normalize_email
+from .serializers import (
+    AdminQueueEntrySerializer,
+    CampusSettingsSerializer,
+    CompleteStudentProfileSerializer,
+    CompleteVerificationSerializer,
+    JoinQueueSerializer,
+    LecturerRegisterSerializer,
+    LoginSerializer,
+    NotificationBatchSerializer,
+    NotifyBatchSerializer,
+    QueueEntryIdSerializer,
+    QueueEntrySerializer,
+    RescheduleSerializer,
+    StudentProfileSerializer,
+    StudentRegisterSerializer,
+    VerifyCodeSerializer,
+)
+
+User = get_user_model()
+
+
+class IsQueueAdmin(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_queue_admin
+        )
+
+
+def tokens_for_user(user):
+    refresh = RefreshToken.for_user(user)
+    payload = {
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "phone": user.phone,
+            "role": user.role,
+            "full_name": user.get_full_name() or user.username,
+        },
+    }
+    if hasattr(user, "profile"):
+        payload["user"]["profile_complete"] = user.profile.is_profile_complete
+        payload["user"]["registration_number"] = user.profile.registration_number
+    return payload
+
+
+def get_queue_entry(profile):
+    return QueueEntry.objects.filter(student=profile).select_related(
+        "student", "student__user"
+    ).first()
+
+
+def renumber_queue_positions():
+    entries = list(QueueEntry.objects.order_by("position", "id"))
+    for index, entry in enumerate(entries, start=1):
+        if entry.position != index:
+            entry.position = index
+            entry.save(update_fields=["position", "updated_at"])
+
+
+def can_reschedule_entry(entry) -> bool:
+    if entry.status in (
+        QueueEntry.Status.APPROVED,
+        QueueEntry.Status.REJECTED,
+        QueueEntry.Status.WAITING,
+    ):
+        return False
+    return entry.status in (
+        QueueEntry.Status.NOTIFIED,
+        QueueEntry.Status.CHECKED_IN,
+        QueueEntry.Status.SKIPPED,
+    ) or bool(entry.scheduled_date)
+
+
+def apply_reschedule(entry, scheduled_date, *, notify=True):
+    code = entry.assign_secret_code()
+    entry.status = QueueEntry.Status.NOTIFIED
+    entry.scheduled_date = scheduled_date
+    entry.notified_at = timezone.now()
+    entry.checked_in_at = None
+    entry.verified_at = None
+    entry.verification_notes = ""
+    entry.save(
+        update_fields=[
+            "secret_code",
+            "status",
+            "scheduled_date",
+            "notified_at",
+            "checked_in_at",
+            "verified_at",
+            "verification_notes",
+            "updated_at",
+        ]
+    )
+
+    channels = []
+    if notify:
+        body = build_approval_message(
+            full_name=entry.student.full_name,
+            registration_number=entry.student.registration_number,
+            scheduled_date=scheduled_date,
+            secret_code=code,
+            position=entry.position,
+        )
+        subject = f"KabQue: Rescheduled approval on {scheduled_date.isoformat()}"
+        email = entry.student.user.email
+        phone = entry.student.user.phone
+        if email:
+            ok, err = send_email_notification(email, subject, body)
+            channels.append({"channel": "email", "success": ok, "error": err})
+        if phone:
+            ok, err = send_sms_notification(phone, body)
+            channels.append({"channel": "sms", "success": ok, "error": err})
+
+    return code, channels
+
+
+def remove_queue_entry(entry):
+    profile = entry.student
+    entry.delete()
+    profile.joined_queue_at = None
+    profile.save(update_fields=["joined_queue_at"])
+    renumber_queue_positions()
+    return profile
+
+
+def profile_payload(profile, request=None):
+    return StudentProfileSerializer(profile, context={"request": request}).data
+
+
+class RegisterView(APIView):
+    """
+    One signup form. Backend decides the role:
+    - registration number → fresher (student dashboard)
+    - email ending @kab.ac.ug → lecturer / supervisor (admin dashboard)
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        identifier = (
+            request.data.get("identifier")
+            or request.data.get("registration_number")
+            or request.data.get("email")
+            or ""
+        )
+        identifier = str(identifier).strip()
+        password = request.data.get("password")
+        account_type = (request.data.get("account_type") or "").strip().lower()
+
+        # Prefer explicit type when provided; otherwise detect from identifier
+        if not account_type:
+            account_type = "lecturer" if "@" in identifier else "student"
+
+        if account_type in ("lecturer", "supervisor", "admin"):
+            payload = {
+                "email": identifier or request.data.get("email"),
+                "password": password,
+                "full_name": request.data.get("full_name", ""),
+            }
+            serializer = LecturerRegisterSerializer(data=payload)
+            serializer.is_valid(raise_exception=True)
+            result = serializer.save()
+            data = tokens_for_user(result["user"])
+            data["message"] = "Welcome to KabQue."
+            return Response(data, status=status.HTTP_201_CREATED)
+
+        if account_type != "student":
+            return Response(
+                {"detail": "Unable to create account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if "@" in identifier:
+            return Response(
+                {"detail": "Unable to create account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = StudentRegisterSerializer(
+            data={
+                "registration_number": identifier
+                or request.data.get("registration_number"),
+                "password": password,
+            }
+        )
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+        data = tokens_for_user(result["user"])
+        data["in_queue"] = False
+        data["profile_complete"] = False
+        data["message"] = "Welcome to KabQue."
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+class LoginView(APIView):
+    """
+    One sign-in form. Backend decides access:
+    - registration number → fresher
+    - @kab.ac.ug email → lecturer / supervisor
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data["identifier"].strip()
+        password = serializer.validated_data["password"]
+        user = None
+
+        if "@" in identifier:
+            email = normalize_email(identifier)
+            # Only official Kabale staff emails may sign in via email
+            if not is_kab_university_email(email):
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            user_obj = User.objects.filter(email__iexact=email).first()
+            if user_obj is None:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            user = authenticate(username=user_obj.username, password=password)
+            if user is None:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            if not user.is_queue_admin:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+        else:
+            profile = (
+                StudentProfile.objects.filter(registration_number__iexact=identifier)
+                .select_related("user")
+                .first()
+            )
+            if profile is None:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            user = authenticate(username=profile.user.username, password=password)
+            if user is None:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            if user.role != User.Role.STUDENT:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+        data = tokens_for_user(user)
+        if hasattr(user, "profile"):
+            entry = get_queue_entry(user.profile)
+            data["in_queue"] = entry is not None
+            data["profile_complete"] = user.profile.is_profile_complete
+            if entry:
+                data["queue"] = QueueEntrySerializer(
+                    entry, context={"request": request}
+                ).data
+        return Response(data)
+
+
+class MeView(APIView):
+    def get(self, request):
+        data = tokens_for_user(request.user)
+        del data["refresh"]
+        del data["access"]
+        if hasattr(request.user, "profile"):
+            entry = get_queue_entry(request.user.profile)
+            data["in_queue"] = entry is not None
+            data["profile_complete"] = request.user.profile.is_profile_complete
+            data["profile"] = profile_payload(request.user.profile, request)
+            if entry:
+                data["queue"] = QueueEntrySerializer(
+                    entry, context={"request": request}
+                ).data
+        else:
+            data["in_queue"] = False
+            data["profile_complete"] = True
+        return Response(data)
+
+
+class StudentQueueStatusView(APIView):
+    def get(self, request):
+        if not hasattr(request.user, "profile"):
+            return Response(
+                {"detail": "No student profile."}, status=status.HTTP_404_NOT_FOUND
+            )
+        if request.user.role != User.Role.STUDENT:
+            return Response(
+                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        profile = request.user.profile
+        entry = get_queue_entry(profile)
+        if not entry:
+            return Response(
+                {
+                    "in_queue": False,
+                    "profile_complete": profile.is_profile_complete,
+                    "profile": profile_payload(profile, request),
+                }
+            )
+        ahead = QueueEntry.objects.filter(
+            position__lt=entry.position,
+            status=QueueEntry.Status.WAITING,
+        ).count()
+        payload = QueueEntrySerializer(entry, context={"request": request}).data
+        payload["in_queue"] = True
+        payload["profile_complete"] = profile.is_profile_complete
+        payload["students_ahead_waiting"] = ahead
+        return Response(payload)
+
+
+class CompleteStudentProfileView(APIView):
+    """Fresher completes bio + faculty details before GPS join."""
+
+    def post(self, request):
+        if not hasattr(request.user, "profile") or request.user.role != User.Role.STUDENT:
+            return Response(
+                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+            )
+        serializer = CompleteStudentProfileSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        profile = serializer.save()
+        return Response(
+            {
+                "message": "Profile saved. You can join the queue when you are on campus.",
+                "profile_complete": profile.is_profile_complete,
+                "profile": profile_payload(profile, request),
+                "user": tokens_for_user(request.user)["user"],
+            }
+        )
+
+
+class JoinQueueView(APIView):
+    """Student joins the priority queue only after profile + on-campus GPS verification."""
+
+    @transaction.atomic
+    def post(self, request):
+        if not hasattr(request.user, "profile"):
+            return Response(
+                {"detail": "No student profile."}, status=status.HTTP_404_NOT_FOUND
+            )
+        if request.user.role != User.Role.STUDENT:
+            return Response(
+                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        profile = request.user.profile
+        if not profile.is_profile_complete:
+            return Response(
+                {
+                    "detail": (
+                        "Complete your profile (name, contact, faculty, and programme) "
+                        "before joining the queue."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if get_queue_entry(profile):
+            return Response(
+                {"detail": "You are already in the queue."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = JoinQueueSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        profile.registered_latitude = serializer.validated_data["latitude"]
+        profile.registered_longitude = serializer.validated_data["longitude"]
+        profile.joined_queue_at = timezone.now()
+        profile.save(
+            update_fields=[
+                "registered_latitude",
+                "registered_longitude",
+                "joined_queue_at",
+            ]
+        )
+
+        last = QueueEntry.objects.select_for_update().order_by("-position").first()
+        position = (last.position + 1) if last else 1
+        entry = QueueEntry.objects.create(student=profile, position=position)
+
+        payload = QueueEntrySerializer(entry, context={"request": request}).data
+        payload["in_queue"] = True
+        payload["students_ahead_waiting"] = QueueEntry.objects.filter(
+            position__lt=entry.position,
+            status=QueueEntry.Status.WAITING,
+        ).count()
+        return Response(
+            {
+                "message": (
+                    f"You have joined the KabQue priority queue at position #{position}."
+                ),
+                "queue": payload,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class StudentRescheduleView(APIView):
+    """Fresher picks a new approval day when they cannot attend the assigned one."""
+
+    @transaction.atomic
+    def post(self, request):
+        if not hasattr(request.user, "profile") or request.user.role != User.Role.STUDENT:
+            return Response(
+                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+            )
+        entry = get_queue_entry(request.user.profile)
+        if not entry:
+            return Response(
+                {"detail": "You are not in the queue."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not can_reschedule_entry(entry):
+            return Response(
+                {"detail": "No assigned day to reschedule."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RescheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        code, channels = apply_reschedule(
+            entry, serializer.validated_data["scheduled_date"], notify=True
+        )
+        entry.refresh_from_db()
+        payload = QueueEntrySerializer(entry, context={"request": request}).data
+        payload["in_queue"] = True
+        return Response(
+            {
+                "message": f"Rescheduled to {serializer.validated_data['scheduled_date']}.",
+                "secret_code": code,
+                "channels": channels,
+                "queue": payload,
+            }
+        )
+
+
+class StudentLeaveQueueView(APIView):
+    """Remove the student from the queue (cancel assignment / leave for other priorities)."""
+
+    @transaction.atomic
+    def post(self, request):
+        if not hasattr(request.user, "profile") or request.user.role != User.Role.STUDENT:
+            return Response(
+                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+            )
+        entry = get_queue_entry(request.user.profile)
+        if not entry:
+            return Response(
+                {"detail": "You are not in the queue."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if entry.status in (
+            QueueEntry.Status.APPROVED,
+            QueueEntry.Status.REJECTED,
+        ):
+            return Response(
+                {"detail": "This queue result is already final."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        remove_queue_entry(entry)
+        profile = request.user.profile
+        return Response(
+            {
+                "message": "You have left the queue.",
+                "in_queue": False,
+                "profile_complete": profile.is_profile_complete,
+                "profile": profile_payload(profile, request),
+            }
+        )
+
+
+class AdminDashboardView(APIView):
+    permission_classes = [IsQueueAdmin]
+
+    def get(self, request):
+        counts = QueueEntry.objects.aggregate(
+            total=Count("id"),
+            waiting=Count("id", filter=Q(status=QueueEntry.Status.WAITING)),
+            notified=Count("id", filter=Q(status=QueueEntry.Status.NOTIFIED)),
+            checked_in=Count("id", filter=Q(status=QueueEntry.Status.CHECKED_IN)),
+            approved=Count("id", filter=Q(status=QueueEntry.Status.APPROVED)),
+            rejected=Count("id", filter=Q(status=QueueEntry.Status.REJECTED)),
+            skipped=Count("id", filter=Q(status=QueueEntry.Status.SKIPPED)),
+        )
+        by_faculty = list(
+            QueueEntry.objects.values("student__faculty")
+            .annotate(count=Count("id"))
+            .order_by("-count", "student__faculty")
+        )
+        by_programme = list(
+            QueueEntry.objects.values("student__faculty", "student__programme")
+            .annotate(count=Count("id"))
+            .order_by("student__faculty", "-count", "student__programme")
+        )
+        # Only students currently in the queue (join adds, leave removes).
+        by_faculty = [
+            {"faculty": row["student__faculty"] or "", "count": row["count"]}
+            for row in by_faculty
+        ]
+        by_programme = [
+            {
+                "faculty": row["student__faculty"] or "",
+                "programme": row["student__programme"] or "",
+                "count": row["count"],
+            }
+            for row in by_programme
+        ]
+        campus = CampusSettings.get_solo()
+        remaining = counts["waiting"] or 0
+        return Response(
+            {
+                "counts": {
+                    **counts,
+                    "remaining": remaining,
+                },
+                "by_faculty": by_faculty,
+                "by_programme": by_programme,
+                "campus": CampusSettingsSerializer(campus).data,
+            }
+        )
+
+
+class AdminQueueListView(APIView):
+    permission_classes = [IsQueueAdmin]
+
+    def get(self, request):
+        qs = QueueEntry.objects.select_related("student", "student__user").all()
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        search = request.query_params.get("search")
+        if search:
+            qs = qs.filter(
+                Q(student__registration_number__icontains=search)
+                | Q(student__full_name__icontains=search)
+                | Q(student__faculty__icontains=search)
+                | Q(student__programme__icontains=search)
+                | Q(secret_code__iexact=search)
+            )
+        serializer = AdminQueueEntrySerializer(qs[:500], many=True)
+        return Response(serializer.data)
+
+
+class NotifyBatchView(APIView):
+    """Notify the next waiting students in first-come-first-served order (by position)."""
+
+    permission_classes = [IsQueueAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = NotifyBatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        requested = serializer.validated_data["batch_size"]
+        scheduled_date = serializer.validated_data["scheduled_date"]
+        channel = serializer.validated_data["channel"]
+
+        waiting_qs = (
+            QueueEntry.objects.select_for_update()
+            .select_related("student", "student__user")
+            .filter(status=QueueEntry.Status.WAITING)
+            .order_by("position", "created_at", "id")
+        )
+        available = waiting_qs.count()
+        if available == 0:
+            return Response(
+                {
+                    "detail": "No students remaining in the waiting queue.",
+                    "requested": requested,
+                    "available": 0,
+                    "remaining": 0,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        take = min(requested, available)
+        entries = list(waiting_qs[:take])
+        shortage = requested > available
+
+        batch = NotificationBatch.objects.create(
+            created_by=request.user,
+            scheduled_date=scheduled_date,
+            batch_size=len(entries),
+            channel=channel,
+        )
+
+        results = []
+        now = timezone.now()
+        for entry in entries:
+            code = entry.assign_secret_code()
+            entry.status = QueueEntry.Status.NOTIFIED
+            entry.scheduled_date = scheduled_date
+            entry.notified_at = now
+            entry.save(
+                update_fields=[
+                    "secret_code",
+                    "status",
+                    "scheduled_date",
+                    "notified_at",
+                    "updated_at",
+                ]
+            )
+
+            body = build_approval_message(
+                full_name=entry.student.full_name,
+                registration_number=entry.student.registration_number,
+                scheduled_date=scheduled_date,
+                secret_code=code,
+                position=entry.position,
+            )
+            subject = f"KabQue: Document approval on {scheduled_date.isoformat()}"
+
+            channels_tried = []
+            if channel in ("email", "both"):
+                ok, err = send_email_notification(
+                    entry.student.user.email, subject, body
+                )
+                NotificationLog.objects.create(
+                    batch=batch,
+                    queue_entry=entry,
+                    channel="email",
+                    destination=entry.student.user.email or "",
+                    body=body,
+                    success=ok,
+                    error_message=err,
+                )
+                channels_tried.append({"channel": "email", "success": ok, "error": err})
+
+            if channel in ("sms", "both"):
+                ok, err = send_sms_notification(entry.student.user.phone, body)
+                NotificationLog.objects.create(
+                    batch=batch,
+                    queue_entry=entry,
+                    channel="sms",
+                    destination=entry.student.user.phone or "",
+                    body=body,
+                    success=ok,
+                    error_message=err,
+                )
+                channels_tried.append({"channel": "sms", "success": ok, "error": err})
+
+            results.append(
+                {
+                    "position": entry.position,
+                    "registration_number": entry.student.registration_number,
+                    "full_name": entry.student.full_name,
+                    "secret_code": code,
+                    "scheduled_date": scheduled_date.isoformat(),
+                    "channels": channels_tried,
+                }
+            )
+
+        remaining = QueueEntry.objects.filter(status=QueueEntry.Status.WAITING).count()
+        if shortage:
+            message = (
+                f"Only {available} student(s) were waiting. "
+                f"Notified all {len(results)} remaining (you requested {requested}). "
+                f"{remaining} still waiting."
+            )
+        else:
+            message = (
+                f"Notified {len(results)} student(s) in queue order. "
+                f"{remaining} remaining to notify."
+            )
+
+        return Response(
+            {
+                "batch": NotificationBatchSerializer(batch).data,
+                "message": message,
+                "requested": requested,
+                "available": available,
+                "notified_count": len(results),
+                "shortage": shortage,
+                "remaining": remaining,
+                "students": results,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class VerifyCodeView(APIView):
+    permission_classes = [IsQueueAdmin]
+
+    def post(self, request):
+        serializer = VerifyCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        code = serializer.validated_data["secret_code"].strip().upper()
+
+        entry = (
+            QueueEntry.objects.select_related("student", "student__user")
+            .filter(secret_code__iexact=code)
+            .exclude(
+                status__in=[
+                    QueueEntry.Status.APPROVED,
+                    QueueEntry.Status.REJECTED,
+                    QueueEntry.Status.WAITING,
+                ]
+            )
+            .first()
+        )
+        if not entry:
+            return Response(
+                {"detail": "Invalid or unused secret code."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if entry.status == QueueEntry.Status.NOTIFIED:
+            entry.status = QueueEntry.Status.CHECKED_IN
+            entry.checked_in_at = timezone.now()
+            entry.save(update_fields=["status", "checked_in_at", "updated_at"])
+
+        return Response(
+            {
+                "message": "Student identity confirmed. Proceed with document verification.",
+                "entry": AdminQueueEntrySerializer(entry).data,
+            }
+        )
+
+
+class CompleteVerificationView(APIView):
+    permission_classes = [IsQueueAdmin]
+
+    def post(self, request):
+        serializer = CompleteVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        entry = QueueEntry.objects.filter(
+            id=serializer.validated_data["queue_entry_id"]
+        ).first()
+        if not entry:
+            return Response(
+                {"detail": "Queue entry not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        decision = serializer.validated_data["decision"]
+        entry.status = decision
+        entry.verified_at = timezone.now()
+        entry.verification_notes = serializer.validated_data.get("notes", "")
+        entry.save(
+            update_fields=["status", "verified_at", "verification_notes", "updated_at"]
+        )
+        return Response({"entry": AdminQueueEntrySerializer(entry).data})
+
+
+class AdminRescheduleView(APIView):
+    permission_classes = [IsQueueAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = RescheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        entry_id = serializer.validated_data.get("queue_entry_id")
+        if not entry_id:
+            return Response(
+                {"detail": "queue_entry_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        entry = (
+            QueueEntry.objects.select_related("student", "student__user")
+            .filter(id=entry_id)
+            .first()
+        )
+        if not entry:
+            return Response(
+                {"detail": "Queue entry not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        if not can_reschedule_entry(entry):
+            return Response(
+                {"detail": "This entry cannot be rescheduled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        code, channels = apply_reschedule(
+            entry, serializer.validated_data["scheduled_date"], notify=True
+        )
+        entry.refresh_from_db()
+        return Response(
+            {
+                "message": f"Rescheduled to {serializer.validated_data['scheduled_date']}.",
+                "secret_code": code,
+                "channels": channels,
+                "entry": AdminQueueEntrySerializer(entry).data,
+            }
+        )
+
+
+class AdminRemoveFromQueueView(APIView):
+    permission_classes = [IsQueueAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = QueueEntryIdSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        entry_id = serializer.validated_data.get("queue_entry_id")
+        if not entry_id:
+            return Response(
+                {"detail": "queue_entry_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        entry = QueueEntry.objects.filter(id=entry_id).select_related("student").first()
+        if not entry:
+            return Response(
+                {"detail": "Queue entry not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        if entry.status in (
+            QueueEntry.Status.APPROVED,
+            QueueEntry.Status.REJECTED,
+        ):
+            return Response(
+                {"detail": "Finalised entries cannot be removed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reg = entry.student.registration_number
+        remove_queue_entry(entry)
+        return Response(
+            {
+                "message": f"Removed {reg} from the queue.",
+                "removed": True,
+            }
+        )
+
+
+class CampusSettingsView(APIView):
+    permission_classes = [IsQueueAdmin]
+
+    def get(self, request):
+        return Response(CampusSettingsSerializer(CampusSettings.get_solo()).data)
+
+    def patch(self, request):
+        campus = CampusSettings.get_solo()
+        serializer = CampusSettingsSerializer(campus, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
