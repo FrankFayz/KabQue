@@ -44,6 +44,7 @@ class Command(BaseCommand):
                 "role": User.Role.ADMIN,
                 "is_staff": True,
                 "is_superuser": True,
+                "is_approved": True,
                 "first_name": first,
                 "last_name": last,
             },
@@ -57,6 +58,7 @@ class Command(BaseCommand):
             user.role = User.Role.ADMIN
             user.is_staff = True
             user.is_superuser = True
+            user.is_approved = True
             user.first_name = first
             user.last_name = last
             user.set_password(password)
@@ -68,8 +70,9 @@ class Command(BaseCommand):
             legacy.email = email
             legacy.role = User.Role.ADMIN
             legacy.is_staff = True
+            legacy.is_approved = True
             legacy.set_password(password)
-            legacy.save(update_fields=["email", "role", "is_staff", "password"])
+            legacy.save(update_fields=["email", "role", "is_staff", "is_approved", "password"])
             self.stdout.write(self.style.WARNING("Also updated legacy username 'admin'"))
 
         self.stdout.write(f"Supervisor login: email={email} password={password}")

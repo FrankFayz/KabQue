@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, setAuth } from '../../api';
+import { homePathFor } from '../../authRoles';
 import Alert from '../ui/Alert';
 import PasswordField from '../ui/PasswordField';
 
@@ -10,11 +11,13 @@ export default function RegisterForm() {
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e) {
     e.preventDefault();
     setError('');
+    setInfo('');
 
     if (password !== passwordConfirm) {
       setError('Passwords do not match.');
@@ -31,8 +34,20 @@ export default function RegisterForm() {
           password,
         },
       });
+
+      // Supervisors must wait for Main Admin approval — no tokens issued
+      if (data.pending_approval) {
+        setInfo(
+          data.message ||
+            'Account created. Wait for Main Admin approval before signing in.'
+        );
+        setPassword('');
+        setPasswordConfirm('');
+        return;
+      }
+
       setAuth(data);
-      navigate(data.user.role === 'admin' ? '/admin' : '/student');
+      navigate(homePathFor(data.user));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -45,12 +60,13 @@ export default function RegisterForm() {
       <p className="auth-form-eyebrow">KabQue</p>
       <h1>Create account</h1>
       <Alert>{error}</Alert>
+      {info ? <Alert variant="info">{info}</Alert> : null}
       <label>
         Account
         <input
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="Enter Your Registration Number"
+          placeholder="Reg number, @kab.ac.ug, or Main Admin username"
           autoComplete="username"
           required
         />

@@ -3,7 +3,12 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from .auth_utils import is_kab_university_email, kab_email_error_message, normalize_email
+from .auth_utils import (
+    is_kab_university_email,
+    kab_email_error_message,
+    normalize_email,
+    username_is_main_admin,
+)
 from .geo import is_on_campus
 from .models import CampusSettings, NotificationBatch, QueueEntry, StudentProfile
 from .phones import validate_east_africa_phone
@@ -21,6 +26,8 @@ class StudentRegisterSerializer(serializers.Serializer):
         reg = value.strip().upper()
         if not reg:
             raise serializers.ValidationError("Registration number is required.")
+        if username_is_main_admin(reg) or username_is_main_admin(reg.lower()):
+            raise serializers.ValidationError("Unable to create account.")
         if StudentProfile.objects.filter(registration_number__iexact=reg).exists():
             raise serializers.ValidationError(
                 "This registration number is already registered."
@@ -41,6 +48,7 @@ class StudentRegisterSerializer(serializers.Serializer):
             email="",
             password=validated_data["password"],
             role=User.Role.STUDENT,
+            is_approved=True,
         )
         profile = StudentProfile.objects.create(
             user=user,
@@ -52,8 +60,40 @@ class StudentRegisterSerializer(serializers.Serializer):
         return {"user": user, "profile": profile}
 
 
+class MainAdminRegisterSerializer(serializers.Serializer):
+    """Main Admin: username must contain #@admin@#."""
+
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True, min_length=6)
+
+    def validate_username(self, value):
+        username = (value or "").strip()
+        if not username_is_main_admin(username):
+            raise serializers.ValidationError("Unable to create account.")
+        if User.objects.filter(username__iexact=username).exists():
+            raise serializers.ValidationError("This username is already registered.")
+        return username
+
+    @transaction.atomic
+    def create(self, validated_data):
+        username = validated_data["username"]
+        user = User.objects.create_user(
+            username=username,
+            email="",
+            password=validated_data["password"],
+            role=User.Role.MAIN_ADMIN,
+            is_staff=False,
+            is_approved=True,
+        )
+        return {"user": user}
+
+
 class LecturerRegisterSerializer(serializers.Serializer):
-    """Lecturer / supervisor account: official @kab.ac.ug email + password."""
+    """Lecturer / supervisor account: official @kab.ac.ug email + password.
+
+    Account is created inactive for desk access until a Main Admin approves
+    that the person is Kabale staff.
+    """
 
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=6)
@@ -85,9 +125,9 @@ class LecturerRegisterSerializer(serializers.Serializer):
             last_name=last,
             role=User.Role.ADMIN,
             is_staff=True,
+            is_approved=False,
         )
         return {"user": user}
-
 
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField(
@@ -319,3 +359,29 @@ class NotificationBatchSerializer(serializers.ModelSerializer):
             "channel",
             "created_at",
         )
+
+
+class MainAdminUserSerializer(serializers.Serializer):
+    """Read-only user rows for the Main Admin control page."""
+
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    email = serializers.EmailField(allow_blank=True)
+    phone = serializers.CharField(allow_blank=True)
+    full_name = serializers.CharField()
+    role = serializers.CharField()
+    is_approved = serializers.BooleanField()
+    date_joined = serializers.DateTimeField()
+    # Fresher-only fields
+    registration_number = serializers.CharField(required=False, allow_blank=True)
+    faculty = serializers.CharField(required=False, allow_blank=True)
+    programme = serializers.CharField(required=False, allow_blank=True)
+    profile_complete = serializers.BooleanField(required=False)
+    verification_status = serializers.CharField(required=False, allow_blank=True)
+    queue_position = serializers.IntegerField(required=False, allow_null=True)
+    scheduled_date = serializers.DateField(required=False, allow_null=True)
+
+
+class ApproveSupervisorSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
+    approve = serializers.BooleanField(default=True)

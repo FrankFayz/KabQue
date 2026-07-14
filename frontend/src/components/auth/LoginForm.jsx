@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, setAuth } from '../../api';
+import { homePathFor } from '../../authRoles';
 import Alert from '../ui/Alert';
 import PasswordField from '../ui/PasswordField';
 
@@ -26,7 +27,7 @@ export default function LoginForm() {
         setError('Sign in succeeded but no user was returned. Try again.');
         return;
       }
-      navigate(data.user.role === 'admin' ? '/admin' : '/student');
+      navigate(homePathFor(data.user));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -44,7 +45,7 @@ export default function LoginForm() {
         <input
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="Enter Your Registration Number"
+          placeholder="Reg number, @kab.ac.ug, or Main Admin username"
           autoComplete="username"
           required
         />

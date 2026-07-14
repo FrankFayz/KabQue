@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../api';
+import { Link } from 'react-router-dom';
+import { api, getStoredUser } from '../api';
+import { isMainAdmin } from '../authRoles';
 import AdminStats from '../components/admin/AdminStats';
 import AnalyticsBreakdown from '../components/admin/AnalyticsBreakdown';
 import BatchResultTable from '../components/admin/BatchResultTable';
@@ -10,6 +12,7 @@ import Alert from '../components/ui/Alert';
 import PageHeader from '../components/ui/PageHeader';
 
 export default function AdminDashboard() {
+  const viewingAsMainAdmin = isMainAdmin(getStoredUser());
   const [dash, setDash] = useState(null);
   const [queue, setQueue] = useState([]);
   const [status, setStatus] = useState('');
@@ -186,10 +189,15 @@ export default function AdminDashboard() {
   return (
     <section className="dash">
       <PageHeader
-        eyebrow="Admin desk"
+        eyebrow={viewingAsMainAdmin ? 'Main Admin · monitoring' : 'Admin desk'}
         title="KabQue control"
         action={
           <div className="dash-actions">
+            {viewingAsMainAdmin ? (
+              <Link to="/main-admin" className="btn btn-secondary">
+                Back to Main Admin
+              </Link>
+            ) : null}
             {lastSynced && (
               <span className="dash-refreshed">
                 Live · {lastSynced.toLocaleTimeString()}

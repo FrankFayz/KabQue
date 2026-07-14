@@ -16,15 +16,21 @@ from .notifications import (
     send_email_notification,
     send_sms_notification,
 )
-from .auth_utils import is_kab_university_email, kab_email_error_message, normalize_email
+from .auth_utils import (
+    is_kab_university_email,
+    normalize_email,
+    username_is_main_admin,
+)
 from .serializers import (
     AdminQueueEntrySerializer,
+    ApproveSupervisorSerializer,
     CampusSettingsSerializer,
     CompleteStudentProfileSerializer,
     CompleteVerificationSerializer,
     JoinQueueSerializer,
     LecturerRegisterSerializer,
     LoginSerializer,
+    MainAdminRegisterSerializer,
     NotificationBatchSerializer,
     NotifyBatchSerializer,
     QueueEntryIdSerializer,
@@ -39,11 +45,24 @@ User = get_user_model()
 
 
 class IsQueueAdmin(permissions.BasePermission):
+    """Approved supervisors only (desk operations)."""
+
     def has_permission(self, request, view):
         return bool(
             request.user
             and request.user.is_authenticated
             and request.user.is_queue_admin
+        )
+
+
+class IsMainAdmin(permissions.BasePermission):
+    """System Main Admins (username contains #@admin@#)."""
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_main_admin
         )
 
 
@@ -58,6 +77,9 @@ def tokens_for_user(user):
             "email": user.email,
             "phone": user.phone,
             "role": user.role,
+            "is_approved": user.is_approved,
+            "is_main_admin": user.is_main_admin,
+            "is_staff": user.is_staff,
             "full_name": user.get_full_name() or user.username,
         },
     }
@@ -198,8 +220,9 @@ def profile_payload(profile, request=None):
 class RegisterView(APIView):
     """
     One signup form. Backend decides the role:
+    - username containing #@admin@# → Main Admin (system control)
     - registration number → fresher (student dashboard)
-    - email ending @kab.ac.ug → lecturer / supervisor (admin dashboard)
+    - email ending @kab.ac.ug → supervisor (pending Main Admin approval)
     """
 
     permission_classes = [permissions.AllowAny]
@@ -209,11 +232,23 @@ class RegisterView(APIView):
             request.data.get("identifier")
             or request.data.get("registration_number")
             or request.data.get("email")
+            or request.data.get("username")
             or ""
         )
         identifier = str(identifier).strip()
         password = request.data.get("password")
         account_type = (request.data.get("account_type") or "").strip().lower()
+
+        # Main Admin: username must include the marker string
+        if username_is_main_admin(identifier) or account_type == "main_admin":
+            serializer = MainAdminRegisterSerializer(
+                data={"username": identifier, "password": password}
+            )
+            serializer.is_valid(raise_exception=True)
+            result = serializer.save()
+            data = tokens_for_user(result["user"])
+            data["message"] = "Main Admin account created."
+            return Response(data, status=status.HTTP_201_CREATED)
 
         # Prefer explicit type when provided; otherwise detect from identifier
         if not account_type:
@@ -228,9 +263,23 @@ class RegisterView(APIView):
             serializer = LecturerRegisterSerializer(data=payload)
             serializer.is_valid(raise_exception=True)
             result = serializer.save()
-            data = tokens_for_user(result["user"])
-            data["message"] = "Welcome to KabQue."
-            return Response(data, status=status.HTTP_201_CREATED)
+            # Do NOT issue tokens — supervisor cannot enter the system until approved
+            return Response(
+                {
+                    "pending_approval": True,
+                    "message": (
+                        "Account created. A Main Admin must confirm you are "
+                        "Kabale University staff before you can sign in."
+                    ),
+                    "user": {
+                        "id": result["user"].id,
+                        "email": result["user"].email,
+                        "role": result["user"].role,
+                        "is_approved": False,
+                    },
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
         if account_type != "student":
             return Response(
@@ -263,8 +312,9 @@ class RegisterView(APIView):
 class LoginView(APIView):
     """
     One sign-in form. Backend decides access:
+    - username with #@admin@# → Main Admin
     - registration number → fresher
-    - @kab.ac.ug email → lecturer / supervisor
+    - @kab.ac.ug email → supervisor (must be approved)
     """
 
     permission_classes = [permissions.AllowAny]
@@ -275,6 +325,23 @@ class LoginView(APIView):
         identifier = serializer.validated_data["identifier"].strip()
         password = serializer.validated_data["password"]
         user = None
+
+        # Main Admin username path (may or may not contain @ from the marker)
+        if username_is_main_admin(identifier):
+            user_obj = User.objects.filter(username__iexact=identifier).first()
+            if user_obj is None:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            user = authenticate(username=user_obj.username, password=password)
+            if user is None or not user.is_main_admin:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            data = tokens_for_user(user)
+            return Response(data)
 
         if "@" in identifier:
             email = normalize_email(identifier)
@@ -298,10 +365,24 @@ class LoginView(APIView):
                     {"detail": "Invalid credentials."},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
-            if not user.is_queue_admin:
+            if user.is_main_admin:
+                data = tokens_for_user(user)
+                return Response(data)
+            if user.role != User.Role.ADMIN and not user.is_staff:
                 return Response(
                     {"detail": "Invalid credentials."},
                     status=status.HTTP_401_UNAUTHORIZED,
+                )
+            if not user.is_approved:
+                return Response(
+                    {
+                        "detail": (
+                            "Your supervisor account is awaiting Main Admin approval. "
+                            "You cannot access KabQue until you are confirmed as Kabale staff."
+                        ),
+                        "pending_approval": True,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
                 )
         else:
             profile = (
@@ -1088,3 +1169,186 @@ class CampusSettingsView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+def _main_admin_student_row(profile):
+    try:
+        entry = profile.queue_entry
+    except QueueEntry.DoesNotExist:
+        entry = None
+    if entry is None:
+        verification_status = "not_in_queue"
+        queue_position = None
+        scheduled_date = None
+    else:
+        verification_status = entry.status
+        queue_position = entry.position
+        scheduled_date = entry.scheduled_date
+    user = profile.user
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email or "",
+        "phone": user.phone or "",
+        "full_name": profile.full_name or user.get_full_name() or user.username,
+        "role": user.role,
+        "is_approved": user.is_approved,
+        "date_joined": user.date_joined,
+        "registration_number": profile.registration_number,
+        "faculty": profile.faculty or "",
+        "programme": profile.programme or "",
+        "profile_complete": profile.is_profile_complete,
+        "verification_status": verification_status,
+        "queue_position": queue_position,
+        "scheduled_date": scheduled_date,
+    }
+
+
+def _main_admin_staff_row(user):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email or "",
+        "phone": user.phone or "",
+        "full_name": user.get_full_name() or user.username,
+        "role": user.role,
+        "is_approved": user.is_approved,
+        "date_joined": user.date_joined,
+        "registration_number": "",
+        "faculty": "",
+        "programme": "",
+        "profile_complete": True,
+        "verification_status": "approved" if user.is_approved else "pending",
+        "queue_position": None,
+        "scheduled_date": None,
+    }
+
+
+class MainAdminOverviewView(APIView):
+    """Totals for the Main Admin control page."""
+
+    permission_classes = [IsMainAdmin]
+
+    def get(self, request):
+        freshers = StudentProfile.objects.count()
+        supervisors = User.objects.filter(role=User.Role.ADMIN).exclude(
+            role=User.Role.MAIN_ADMIN
+        )
+        # Role.ADMIN users only; also catch marker usernames for main admins
+        main_admins = User.objects.filter(
+            Q(role=User.Role.MAIN_ADMIN) | Q(username__contains="#@admin@#")
+        ).distinct()
+        pending = supervisors.filter(is_approved=False).count()
+        approved_supervisors = supervisors.filter(is_approved=True).count()
+        return Response(
+            {
+                "totals": {
+                    "freshers": freshers,
+                    "admins": main_admins.count(),
+                    "supervisors": supervisors.count(),
+                    "supervisors_pending": pending,
+                    "supervisors_approved": approved_supervisors,
+                }
+            }
+        )
+
+
+class MainAdminFreshersView(APIView):
+    """All students with profile info and verification / queue status."""
+
+    permission_classes = [IsMainAdmin]
+
+    def get(self, request):
+        search = (request.query_params.get("search") or "").strip()
+        qs = StudentProfile.objects.select_related("user", "queue_entry").order_by(
+            "-registered_at"
+        )
+        if search:
+            qs = qs.filter(
+                Q(registration_number__icontains=search)
+                | Q(full_name__icontains=search)
+                | Q(faculty__icontains=search)
+                | Q(programme__icontains=search)
+                | Q(user__email__icontains=search)
+            )
+        rows = [_main_admin_student_row(p) for p in qs]
+        return Response({"total": len(rows), "results": rows})
+
+
+class MainAdminAdminsView(APIView):
+    """All Main Admin accounts."""
+
+    permission_classes = [IsMainAdmin]
+
+    def get(self, request):
+        qs = (
+            User.objects.filter(
+                Q(role=User.Role.MAIN_ADMIN) | Q(username__contains="#@admin@#")
+            )
+            .distinct()
+            .order_by("-date_joined")
+        )
+        rows = [_main_admin_staff_row(u) for u in qs]
+        return Response({"total": len(rows), "results": rows})
+
+
+class MainAdminSupervisorsView(APIView):
+    """All supervisor accounts (kab staff) with approval status."""
+
+    permission_classes = [IsMainAdmin]
+
+    def get(self, request):
+        status_filter = (request.query_params.get("status") or "").strip().lower()
+        qs = (
+            User.objects.filter(role=User.Role.ADMIN)
+            .exclude(Q(role=User.Role.MAIN_ADMIN) | Q(username__contains="#@admin@#"))
+            .order_by("-date_joined")
+        )
+        if status_filter == "pending":
+            qs = qs.filter(is_approved=False)
+        elif status_filter == "approved":
+            qs = qs.filter(is_approved=True)
+        rows = [_main_admin_staff_row(u) for u in qs]
+        return Response({"total": len(rows), "results": rows})
+
+
+class MainAdminApproveSupervisorView(APIView):
+    """Approve or revoke a supervisor's Kabale staff confirmation."""
+
+    permission_classes = [IsMainAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = ApproveSupervisorSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_id = serializer.validated_data["user_id"]
+        approve = serializer.validated_data["approve"]
+
+        target = User.objects.filter(pk=user_id).first()
+        if not target:
+            return Response(
+                {"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        if target.is_main_admin or target.role == User.Role.MAIN_ADMIN:
+            return Response(
+                {"detail": "Cannot change approval for a Main Admin."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if target.role != User.Role.ADMIN:
+            return Response(
+                {"detail": "Only supervisor accounts can be approved."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target.is_approved = bool(approve)
+        target.save(update_fields=["is_approved"])
+        return Response(
+            {
+                "message": (
+                    f"Supervisor {target.email} approved."
+                    if approve
+                    else f"Supervisor {target.email} approval revoked."
+                ),
+                "user": _main_admin_staff_row(target),
+            }
+        )

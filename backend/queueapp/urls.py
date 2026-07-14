@@ -45,4 +45,29 @@ urlpatterns = [
         name="admin_remove_from_queue",
     ),
     path("admin/campus/", views.CampusSettingsView.as_view(), name="admin_campus"),
+    path(
+        "main-admin/overview/",
+        views.MainAdminOverviewView.as_view(),
+        name="main_admin_overview",
+    ),
+    path(
+        "main-admin/freshers/",
+        views.MainAdminFreshersView.as_view(),
+        name="main_admin_freshers",
+    ),
+    path(
+        "main-admin/admins/",
+        views.MainAdminAdminsView.as_view(),
+        name="main_admin_admins",
+    ),
+    path(
+        "main-admin/supervisors/",
+        views.MainAdminSupervisorsView.as_view(),
+        name="main_admin_supervisors",
+    ),
+    path(
+        "main-admin/approve-supervisor/",
+        views.MainAdminApproveSupervisorView.as_view(),
+        name="main_admin_approve_supervisor",
+    ),
 ]

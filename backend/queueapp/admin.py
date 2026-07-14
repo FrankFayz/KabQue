@@ -13,13 +13,13 @@ from .models import (
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
-    list_display = ("username", "email", "phone", "role", "is_staff")
-    list_filter = ("role", "is_staff")
+    list_display = ("username", "email", "phone", "role", "is_approved", "is_staff")
+    list_filter = ("role", "is_approved", "is_staff")
     fieldsets = DjangoUserAdmin.fieldsets + (
-        ("KabQue", {"fields": ("role", "phone")}),
+        ("KabQue", {"fields": ("role", "phone", "is_approved")}),
     )
     add_fieldsets = DjangoUserAdmin.add_fieldsets + (
-        ("KabQue", {"fields": ("role", "phone", "email")}),
+        ("KabQue", {"fields": ("role", "phone", "email", "is_approved")}),
     )
 
 

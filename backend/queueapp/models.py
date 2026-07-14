@@ -2,8 +2,21 @@ import secrets
 import string
 
 from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.db import models
 from django.utils import timezone
+
+# Marker that grants Main Admin access when present in username.
+MAIN_ADMIN_USERNAME_MARKER = "#@admin@#"
+
+
+class UsernameWithHashValidator(UnicodeUsernameValidator):
+    """Allow '#' so Main Admin usernames can include #@admin@#."""
+
+    regex = r"^[\w.@+\-#]+$"
+    message = (
+        "Enter a valid username. Letters, digits, and @/./+/-/_/# only."
+    )
 
 
 def generate_secret_code(length: int = 8) -> str:
@@ -11,16 +24,51 @@ def generate_secret_code(length: int = 8) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def username_is_main_admin(username: str) -> bool:
+    return MAIN_ADMIN_USERNAME_MARKER in (username or "")
+
+
 class User(AbstractUser):
     class Role(models.TextChoices):
         STUDENT = "student", "Student"
-        ADMIN = "admin", "Admin"
+        ADMIN = "admin", "Supervisor"
+        MAIN_ADMIN = "main_admin", "Main Admin"
 
+    username_validator = UsernameWithHashValidator()
+    username = models.CharField(
+        max_length=150,
+        unique=True,
+        help_text="Required. Letters, digits and @/./+/-/_/# only.",
+        validators=[username_validator],
+        error_messages={"unique": "A user with that username already exists."},
+    )
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.STUDENT)
     phone = models.CharField(max_length=20, blank=True)
+    # Supervisors (kab.ac.ug) must be approved by a Main Admin before desk access.
+    is_approved = models.BooleanField(
+        default=True,
+        help_text="False until a Main Admin confirms Kabale staff membership.",
+    )
+
+    @property
+    def is_main_admin(self) -> bool:
+        return (
+            self.role == self.Role.MAIN_ADMIN
+            or username_is_main_admin(self.username)
+        )
+
+    @property
+    def is_supervisor(self) -> bool:
+        """Desk supervisor (role=admin), not Main Admin."""
+        return self.role == self.Role.ADMIN and not self.is_main_admin
 
     @property
     def is_queue_admin(self) -> bool:
+        """Can operate the supervisor desk (Main Admin or approved supervisor)."""
+        if self.is_main_admin:
+            return True
+        if not self.is_approved:
+            return False
         return self.role == self.Role.ADMIN or self.is_staff
 
 

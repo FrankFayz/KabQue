@@ -2612,3 +2612,132 @@ th {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
+
+/* —— Main Admin control page —— */
+.main-admin-page .main-admin-lead {
+  margin: 0 0 1.1rem;
+  max-width: 46rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.main-admin-monitor-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.main-admin-stats.stat-row {
+  margin-bottom: 1rem;
+}
+
+.main-admin-stats .stat {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--kab-blue) 18%, transparent);
+  background: color-mix(in srgb, var(--kab-blue) 4%, white);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.main-admin-stats .stat:hover {
+  border-color: color-mix(in srgb, var(--kab-blue) 45%, transparent);
+  transform: translateY(-1px);
+}
+
+.main-admin-stats .stat-active {
+  border-color: var(--kab-blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--kab-blue) 22%, transparent);
+  background: color-mix(in srgb, var(--kab-yellow) 18%, white);
+}
+
+.main-admin-panel {
+  margin-top: 0.25rem;
+}
+
+.main-admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--kab-blue) 12%, transparent);
+  padding-bottom: 0.65rem;
+}
+
+.main-admin-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  color: var(--muted);
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.45rem;
+  cursor: pointer;
+}
+
+.main-admin-tab:hover {
+  color: var(--kab-blue-ink);
+  background: color-mix(in srgb, var(--kab-blue) 6%, white);
+}
+
+.main-admin-tab.is-active {
+  color: var(--kab-blue-ink);
+  background: color-mix(in srgb, var(--kab-blue) 12%, white);
+}
+
+.main-admin-count {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.main-admin-count strong {
+  color: var(--kab-blue-ink);
+}
+
+.main-admin-search {
+  display: grid;
+  gap: 0.3rem;
+  min-width: min(240px, 100%);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.main-admin-contact {
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.88rem;
+}
+
+.main-admin-pos {
+  margin-left: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.main-admin-username {
+  font-size: 0.86rem;
+  word-break: break-all;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.status-not_in_queue,
+.status-pending {
+  background: color-mix(in srgb, var(--kab-yellow) 35%, white);
+  color: var(--kab-blue-ink);
+}
+
+@media (max-width: 720px) {
+  .main-admin-monitor-nav {
+    width: 100%;
+  }
+
+  .main-admin-monitor-nav .btn {
+    flex: 1;
+  }
+}
