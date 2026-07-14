@@ -13,8 +13,14 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "insecure-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes")
 ALLOWED_HOSTS = [
-    h.strip() for h in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()
+    h.strip()
+    for h in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if h.strip()
 ]
+# Render injects this automatically — prevents Host header 400s in production
+_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if _render_host and _render_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_render_host)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -135,16 +141,30 @@ if DEBUG:
     # Local browser variants (LAN IP, etc.) during development
     CORS_ALLOW_ALL_ORIGINS = True
 
+CSRF_TRUSTED_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CSRF_TRUSTED_ORIGINS",
+        "https://kabque.onrender.com,https://kab-que.vercel.app",
+    ).split(",")
+    if o.strip()
+]
+if _render_host:
+    _origin = f"https://{_render_host}"
+    if _origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_origin)
+
 
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
 )
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "KabQue <noreply@kabale.ac.ug>")
 
-CAMPUS_LATITUDE = float(os.getenv("CAMPUS_LATITUDE", "-1.272215"))
-CAMPUS_LONGITUDE = float(os.getenv("CAMPUS_LONGITUDE", "29.988321"))
-CAMPUS_RADIUS_METERS = float(os.getenv("CAMPUS_RADIUS_METERS", "800"))
+CAMPUS_LATITUDE = float(os.getenv("CAMPUS_LATITUDE", "1.373333"))
+CAMPUS_LONGITUDE = float(os.getenv("CAMPUS_LONGITUDE", "32.290275"))
+CAMPUS_RADIUS_METERS = float(os.getenv("CAMPUS_RADIUS_METERS", "500000"))
 GPS_ENFORCEMENT = os.getenv("GPS_ENFORCEMENT", "True").lower() in ("1", "true", "yes")
+CAMPUS_NAME = os.getenv("CAMPUS_NAME", "Uganda (nationwide testing)")
 
 AFRICAS_TALKING_USERNAME = os.getenv("AFRICAS_TALKING_USERNAME", "")
 AFRICAS_TALKING_API_KEY = os.getenv("AFRICAS_TALKING_API_KEY", "")
