@@ -180,7 +180,11 @@ export default function StudentDashboard() {
       ) : !profileComplete ? (
         <CompleteProfileCard profile={profile} onSaved={handleProfileSaved} />
       ) : (
-        <JoinQueueCard profile={profile} onJoined={handleJoined} />
+        <JoinQueueCard
+          profile={profile}
+          onJoined={handleJoined}
+          onProfileUpdated={handleProfileSaved}
+        />
       )}
     </section>
   );

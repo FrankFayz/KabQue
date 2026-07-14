@@ -6,6 +6,7 @@ from rest_framework import serializers
 from .auth_utils import is_kab_university_email, kab_email_error_message, normalize_email
 from .geo import is_on_campus
 from .models import CampusSettings, NotificationBatch, QueueEntry, StudentProfile
+from .phones import validate_east_africa_phone
 
 User = get_user_model()
 
@@ -104,11 +105,16 @@ class CompleteStudentProfileSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         email = normalize_email(attrs.get("email") or "")
-        phone = (attrs.get("phone") or "").strip()
-        if not email and not phone:
+        phone_raw = (attrs.get("phone") or "").strip()
+        if not email and not phone_raw:
             raise serializers.ValidationError(
                 "Provide at least an email or a telephone number for notifications."
             )
+
+        try:
+            phone = validate_east_africa_phone(phone_raw)
+        except ValueError as exc:
+            raise serializers.ValidationError({"phone": str(exc)}) from exc
 
         attrs["full_name"] = attrs["full_name"].strip()
         attrs["faculty"] = attrs["faculty"].strip()

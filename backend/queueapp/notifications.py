@@ -7,7 +7,17 @@ import urllib.request
 from django.conf import settings
 from django.core.mail import send_mail
 
+from .phones import normalize_phone
+
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "build_approval_message",
+    "build_approval_sms",
+    "normalize_phone",
+    "send_email_notification",
+    "send_sms_notification",
+]
 
 
 def build_approval_message(
@@ -46,25 +56,6 @@ def build_approval_sms(
         f"Reg {registration_number}, queue #{position}. "
         f"SECRET CODE: {secret_code}. Do not share. — Kabale University"
     )
-
-
-def normalize_phone(phone: str) -> str:
-    """Normalize local UG numbers to E.164 (+256...)."""
-    raw = (phone or "").strip()
-    if not raw:
-        return ""
-    digits = re.sub(r"[^\d+]", "", raw)
-    if digits.startswith("00"):
-        digits = "+" + digits[2:]
-    if digits.startswith("+"):
-        return digits
-    if digits.startswith("256") and len(digits) >= 12:
-        return "+" + digits
-    if digits.startswith("0") and len(digits) >= 9:
-        return "+256" + digits[1:]
-    if len(digits) in (9, 10) and digits[0] in "79":
-        return "+256" + digits
-    return digits if digits.startswith("+") else f"+{digits}" if digits else ""
 
 
 def _parse_from_email(value: str) -> tuple[str, str]:
@@ -153,6 +144,9 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     if not api_key:
         return False, "MYSMSGATE_API_KEY not configured"
 
+    if not to_phone.startswith("+"):
+        return False, f"Phone must start with country code (+…), got: {to_phone}"
+
     endpoint = (
         getattr(settings, "MYSMSGATE_API_URL", "") or "https://mysmsgate.net/api/v1/send"
     ).strip()
@@ -185,7 +179,9 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
+            # MySMSGate accepts with HTTP 202 Accepted
             raw = resp.read().decode("utf-8", errors="replace")
+            logger.info("MySMSGate accepted SMS to %s (HTTP %s)", to_phone, resp.status)
             if raw:
                 try:
                     parsed = json.loads(raw)
@@ -196,18 +192,25 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         return True, ""
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        logger.error("MySMSGate SMS failed (%s): %s", exc.code, detail)
+        logger.error(
+            "MySMSGate SMS failed to %s (%s): %s", to_phone, exc.code, detail
+        )
         return False, f"MySMSGate HTTP {exc.code}: {detail}"
     except Exception as exc:  # noqa: BLE001
-        logger.exception("MySMSGate SMS failed")
+        logger.exception("MySMSGate SMS failed to %s", to_phone)
         return False, str(exc)
 
 
 def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
-    """Send SMS via MySMSGate (primary). Falls back to Africa's Talking if configured."""
+    """Send SMS via MySMSGate to the student's profile phone (E.164 +country)."""
     to_phone = normalize_phone(phone)
     if not to_phone:
         return False, "No phone number on student profile"
+    if not to_phone.startswith("+"):
+        return False, (
+            "Phone number must include a country code (e.g. +256…). "
+            "Ask the student to update their telephone on the profile form."
+        )
 
     if (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip():
         return _send_via_mysmsgate(to_phone, body)

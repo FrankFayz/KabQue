@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { api, setAuth } from '../../api';
+import { isValidE164 } from '../../constants/eastAfricaPhones';
 import FacultyProgrammeFields from '../auth/FacultyProgrammeFields';
 import Alert from '../ui/Alert';
 import Panel from '../ui/Panel';
+import PhoneInput from '../ui/PhoneInput';
 
 export default function CompleteProfileCard({ profile, onSaved }) {
   const [form, setForm] = useState({
@@ -26,8 +28,16 @@ export default function CompleteProfileCard({ profile, onSaved }) {
   async function onSubmit(e) {
     e.preventDefault();
     setError('');
-    if (!form.email.trim() && !form.phone.trim()) {
+    const email = form.email.trim();
+    const phone = form.phone.trim();
+    if (!email && !phone) {
       setError('Provide at least an email or a telephone number for notifications.');
+      return;
+    }
+    if (phone && !isValidE164(phone)) {
+      setError(
+        'Enter a valid East African mobile number with country code (e.g. Uganda +256…).'
+      );
       return;
     }
     setLoading(true);
@@ -38,8 +48,8 @@ export default function CompleteProfileCard({ profile, onSaved }) {
           full_name: form.full_name.trim(),
           faculty: form.faculty,
           programme: form.programme,
-          email: form.email.trim(),
-          phone: form.phone.trim(),
+          email,
+          phone,
         },
       });
       if (data.user) setAuth({ user: data.user });
@@ -77,22 +87,23 @@ export default function CompleteProfileCard({ profile, onSaved }) {
               placeholder="you@example.com"
             />
           </label>
-          <label>
-            Telephone
-            <input
+          <div className="phone-field">
+            <span className="label">Telephone (for SMS)</span>
+            <PhoneInput
               value={form.phone}
-              onChange={update('phone')}
-              placeholder="07…"
-              autoComplete="tel"
+              onChange={(phone) => setForm((f) => ({ ...f, phone }))}
+              placeholder="7XXXXXXXX"
             />
-          </label>
+          </div>
           <FacultyProgrammeFields
             faculty={form.faculty}
             programme={form.programme}
             onChange={updateAcademic}
           />
         </div>
-        <p className="hint">Provide at least email or telephone.</p>
+        <p className="hint">
+          Provide at least email or telephone. SMS needs a number with country code.
+        </p>
         <button type="submit" className="btn btn-primary" disabled={loading}>
           {loading ? 'Saving…' : 'Save details'}
         </button>

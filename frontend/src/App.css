@@ -1964,6 +1964,80 @@ th {
   gap: 0.85rem;
 }
 
+.phone-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.phone-input {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.phone-input-row {
+  display: grid;
+  grid-template-columns: minmax(9.5rem, 0.95fr) minmax(0, 1.2fr);
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.phone-input-row select,
+.phone-input-row input {
+  width: 100%;
+  min-height: 2.65rem;
+}
+
+.phone-input-preview {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.phone-input-preview strong {
+  color: var(--kab-blue-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.sms-phone-block {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f7fbff, #fff);
+}
+
+.sms-phone-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sms-phone-summary strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 560px) {
+  .phone-input-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .auth-switch {
   margin: 0;
   color: var(--muted);

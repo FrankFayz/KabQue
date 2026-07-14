@@ -11,6 +11,7 @@ from .models import CampusSettings, NotificationBatch, NotificationLog, QueueEnt
 from .notifications import (
     build_approval_message,
     build_approval_sms,
+    normalize_phone,
     send_email_notification,
     send_sms_notification,
 )
@@ -687,7 +688,8 @@ class NotifyBatchView(APIView):
                 channels_tried.append({"channel": "email", "success": ok, "error": err})
 
             if channel in ("sms", "both"):
-                ok, err = send_sms_notification(entry.student.user.phone, sms_body)
+                phone = normalize_phone(entry.student.user.phone)
+                ok, err = send_sms_notification(phone, sms_body)
                 if ok:
                     sms_ok += 1
                 else:
@@ -696,7 +698,7 @@ class NotifyBatchView(APIView):
                     batch=batch,
                     queue_entry=entry,
                     channel="sms",
-                    destination=entry.student.user.phone or "",
+                    destination=phone or entry.student.user.phone or "",
                     body=sms_body,
                     success=ok,
                     error_message=err,
@@ -709,7 +711,9 @@ class NotifyBatchView(APIView):
                     "registration_number": entry.student.registration_number,
                     "full_name": entry.student.full_name,
                     "email": entry.student.user.email or "",
-                    "phone": entry.student.user.phone or "",
+                    "phone": normalize_phone(entry.student.user.phone)
+                    or entry.student.user.phone
+                    or "",
                     "secret_code": code,
                     "scheduled_date": scheduled_date.isoformat(),
                     "channels": channels_tried,
