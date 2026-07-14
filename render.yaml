@@ -4,8 +4,8 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput
-    startCommand: gunicorn kabque.wsgi:application --bind 0.0.0.0:$PORT
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py migrate --noinput && gunicorn kabque.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
         value: "3.13.3"
