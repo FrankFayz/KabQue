@@ -2,12 +2,33 @@ import { useEffect, useState } from 'react';
 import { api, getCurrentPosition, setAuth } from '../../api';
 import { isValidE164 } from '../../constants/eastAfricaPhones';
 import Alert from '../ui/Alert';
+import GpsPinIcon from '../ui/GpsPinIcon';
 import Panel from '../ui/Panel';
 import PhoneInput from '../ui/PhoneInput';
+
+function scrubError(message) {
+  const text = String(message || '');
+  if (
+    /<!doctype/i.test(text) ||
+    /<html/i.test(text) ||
+    /Server Error \(500\)/i.test(text)
+  ) {
+    return 'Could not join the queue right now. Please try again.';
+  }
+  return text;
+}
+
+function locationErrorText(err) {
+  const loc = err?.data?.location;
+  if (typeof loc === 'string' && loc.trim()) return loc;
+  if (Array.isArray(loc) && loc.length) return loc.map(String).join(' ');
+  return scrubError(err?.message || 'Unable to confirm your location.');
+}
 
 export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [phase, setPhase] = useState('idle'); // idle | locating | confirming | done
   const [loading, setLoading] = useState(false);
   const [savingPhone, setSavingPhone] = useState(false);
   const [phone, setPhone] = useState(profile?.phone || '');
@@ -48,7 +69,7 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
       setInfo('SMS number updated.');
       onProfileUpdated?.(data);
     } catch (err) {
-      setError(err.message);
+      setError(scrubError(err.message));
     } finally {
       setSavingPhone(false);
     }
@@ -56,11 +77,12 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
 
   async function joinQueue() {
     setError('');
-    setInfo('Checking your GPS location…');
+    setInfo('');
     setLoading(true);
+    setPhase('locating');
     try {
       const loc = await getCurrentPosition();
-      setInfo('Confirming you are within Kabale University campus…');
+      setPhase('confirming');
       const data = await api('/student/join-queue/', {
         method: 'POST',
         body: {
@@ -68,18 +90,19 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
           longitude: loc.longitude,
         },
       });
+      setPhase('done');
       setInfo('');
       onJoined?.(data);
     } catch (err) {
-      const locMsg =
-        err.data?.location ||
-        (Array.isArray(err.data?.location) ? err.data.location.join(' ') : null);
-      setError(locMsg || err.message);
+      setError(locationErrorText(err));
       setInfo('');
+      setPhase('idle');
     } finally {
       setLoading(false);
     }
   }
+
+  const locating = phase === 'locating' || phase === 'confirming';
 
   return (
     <Panel title="Join the queue" className="join-queue-card">
@@ -139,15 +162,46 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
         )}
       </div>
 
+      {locating ? (
+        <div className={`gps-status${phase === 'confirming' ? ' is-confirming' : ''}`} role="status">
+          <div className="gps-status-icon-wrap" aria-hidden="true">
+            <span className="gps-pulse" />
+            <span className="gps-pulse gps-pulse-delay" />
+            <GpsPinIcon className="gps-status-icon" size={36} />
+          </div>
+          <div className="gps-status-copy">
+            <strong>
+              {phase === 'locating' ? 'Checking location' : 'Confirming campus area'}
+            </strong>
+            <p>
+              {phase === 'locating'
+                ? 'Allow GPS access so KabQue can verify you are on campus.'
+                : 'Matching your coordinates to the allowed join zone…'}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <Alert>{error}</Alert>
-      <Alert variant="info">{!error ? info : ''}</Alert>
+      <Alert variant="info">{!error && !locating ? info : ''}</Alert>
+
       <button
         type="button"
-        className="btn btn-primary"
+        className="btn btn-primary btn-join-gps"
         onClick={joinQueue}
         disabled={loading || editingPhone}
       >
-        {loading ? 'Checking location…' : 'Join queue'}
+        {locating ? (
+          <>
+            <GpsPinIcon className="btn-join-gps-icon" size={18} />
+            <span>Checking location…</span>
+          </>
+        ) : (
+          <>
+            <GpsPinIcon className="btn-join-gps-icon" size={18} />
+            <span>Join queue</span>
+          </>
+        )}
       </button>
     </Panel>
   );

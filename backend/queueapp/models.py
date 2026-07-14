@@ -90,9 +90,33 @@ class QueueEntry(models.Model):
         ordering = ["created_at", "id"]
         verbose_name_plural = "Queue entries"
 
+    _position_null_ready = False
+
     def __str__(self) -> str:
         label = f"#{self.position}" if self.position else "queued"
         return f"{label} {self.student.registration_number} ({self.status})"
+
+    @classmethod
+    def ensure_nullable_position(cls) -> None:
+        """Allow NULL batch numbers if migrate has not yet altered the column."""
+        if cls._position_null_ready:
+            return
+        from django.db import connection
+
+        table = cls._meta.db_table
+        try:
+            with connection.cursor() as cursor:
+                if connection.vendor == "postgresql":
+                    cursor.execute(
+                        f"ALTER TABLE {table} ALTER COLUMN position DROP NOT NULL"
+                    )
+                elif connection.vendor == "sqlite":
+                    # SQLite cannot easily DROP NOT NULL; migrate handles new DBs.
+                    pass
+            cls._position_null_ready = True
+        except Exception:
+            # Column may already be nullable / table missing during migrate
+            cls._position_null_ready = True
 
     def assign_secret_code(self) -> str:
         self.secret_code = generate_secret_code()

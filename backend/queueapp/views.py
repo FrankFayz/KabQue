@@ -452,7 +452,24 @@ class JoinQueueView(APIView):
         )
 
         # Join only — no batch number yet. Numbers are assigned when supervisor notifies.
-        entry = QueueEntry.objects.create(student=profile, position=None)
+        QueueEntry.ensure_nullable_position()
+        try:
+            entry = QueueEntry.objects.create(student=profile, position=None)
+        except Exception:
+            QueueEntry._position_null_ready = False
+            QueueEntry.ensure_nullable_position()
+            try:
+                entry = QueueEntry.objects.create(student=profile, position=None)
+            except Exception:
+                return Response(
+                    {
+                        "detail": (
+                            "Could not join the queue due to a temporary server issue. "
+                            "Please try again in a moment."
+                        )
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
 
         payload = QueueEntrySerializer(entry, context={"request": request}).data
         payload["in_queue"] = True
