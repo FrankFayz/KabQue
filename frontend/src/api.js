@@ -1,4 +1,7 @@
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? 'https://kabque.onrender.com/api' : '/api')
+).replace(/\/$/, '');
 
 function getToken() {
   return localStorage.getItem('kabque_access');
