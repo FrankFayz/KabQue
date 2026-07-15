@@ -271,17 +271,20 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         getattr(settings, "MYSMSGATE_SIM_SLOT", None)
     )
 
-    # Try most specific first, then fall back to auto device / auto SIM.
-    # A wrong hard-coded SIM_SLOT=1 (SIM 2) is a common cause of total SMS failure
-    # on single-SIM phones.
+    def with_slot_fields(slot: int) -> dict:
+        # Official docs use `slot`; some MySMSGate examples use `sim_slot`.
+        return {"slot": slot, "sim_slot": slot}
+
+    # Prefer auto SIM first. A hard-coded SIM_SLOT=1 (SIM 2) on a single-SIM
+    # phone is the usual reason email works and SMS "silently" fails.
     attempts: list[dict] = []
-    if device_id and configured_slot is not None:
-        attempts.append({"device_id": device_id, "slot": configured_slot})
     if device_id:
         attempts.append({"device_id": device_id})
-    if configured_slot is not None:
-        attempts.append({"slot": configured_slot})
     attempts.append({})  # first online device, auto SIM
+    if device_id and configured_slot is not None:
+        attempts.append({"device_id": device_id, **with_slot_fields(configured_slot)})
+    if configured_slot is not None:
+        attempts.append(with_slot_fields(configured_slot))
 
     # De-dupe identical payloads while keeping order
     seen = set()
