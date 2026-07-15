@@ -191,7 +191,12 @@ export default function MainAdminDashboard() {
         method: 'POST',
         body: { user_id: row.id },
       });
-      setMessage(data.message || 'Account permanently deleted.');
+      const counts = data.counts || {};
+      const countHint =
+        kind === 'student' && counts.total != null
+          ? ` Desk now: Total ${counts.total ?? 0}, To schedule ${counts.notify_pool ?? counts.remaining ?? 0}, Notified ${counts.notified ?? 0}, Checked in ${counts.checked_in ?? 0}, Approved ${counts.approved ?? 0}.`
+          : '';
+      setMessage((data.message || 'Account permanently deleted.') + countHint);
       await loadTab({ manual: false });
     } catch (err) {
       setError(err.message);

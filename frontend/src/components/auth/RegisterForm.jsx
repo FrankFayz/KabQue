@@ -113,7 +113,7 @@ export default function RegisterForm() {
       setAuth(data);
       navigate(homePathFor(data.user));
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Could not create your account. Please try again.');
     } finally {
       setLoading(false);
     }

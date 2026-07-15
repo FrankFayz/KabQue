@@ -33,7 +33,7 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
     try {
       await onReschedule?.();
     } catch (err) {
-      setLocalError(err.message);
+      setLocalError(err.message || 'Could not update your queue request. Please try again.');
     }
   }
 
@@ -48,7 +48,7 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
     try {
       await onLeave?.();
     } catch (err) {
-      setLocalError(err.message);
+      setLocalError(err.message || 'Could not leave the queue. Please try again.');
     }
   }
 

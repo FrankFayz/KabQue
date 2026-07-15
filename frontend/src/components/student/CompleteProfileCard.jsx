@@ -110,7 +110,7 @@ export default function CompleteProfileCard({ profile, onSaved }) {
       if (data.user) setAuth({ user: data.user });
       onSaved?.(data);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Could not save your profile. Please try again.');
     } finally {
       setLoading(false);
     }

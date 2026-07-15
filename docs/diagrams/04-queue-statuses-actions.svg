@@ -2,7 +2,7 @@
   <title id="title">KabQue  Queue entry statuses for the student</title>
   <desc id="desc">Statuses from waiting through desk outcomes and which student actions are available.</desc>
   <rect width="960" height="560" fill="#ffffff"/>
-  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 4  Statuses &amp; student actions</text>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue ï¿½ Module 4  Statuses &amp; student actions</text>
   <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">What each status means and what the student can do</text>
 
   <!-- Status row -->

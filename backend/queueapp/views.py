@@ -69,6 +69,10 @@ ACCOUNT_LOCKED_MESSAGE = (
     "This account has been locked by a Main Admin. You cannot sign in."
 )
 
+INVALID_LOGIN_MESSAGE = (
+    "That account or password does not match. Check and try again."
+)
+
 
 def _reject_if_locked(user_obj, password):
     """If password is correct but account is locked, return a Response; else None."""
@@ -419,7 +423,12 @@ def remove_queue_entry(entry):
 
 
 def build_queue_counts():
-    """Live queue statuses plus lifetime approved/rejected desk totals."""
+    """
+    Live queue statuses for the desk.
+
+    Approved / rejected use StudentProfile.desk_outcome so deleting a student
+    (even after they left the live queue) immediately corrects those totals.
+    """
     CampusSettings.ensure_lifetime_columns()
     counts = QueueEntry.objects.aggregate(
         total=Count("id"),
@@ -432,17 +441,14 @@ def build_queue_counts():
     )
     approved_live = counts.pop("approved_live") or 0
     rejected_live = counts.pop("rejected_live") or 0
-    try:
-        campus = CampusSettings.get_solo()
-        lifetime_approved = int(getattr(campus, "lifetime_approved", 0) or 0)
-        lifetime_rejected = int(getattr(campus, "lifetime_rejected", 0) or 0)
-    except Exception:
-        lifetime_approved = 0
-        lifetime_rejected = 0
-    counts["approved"] = lifetime_approved + approved_live
-    counts["rejected"] = lifetime_rejected + rejected_live
+
+    # Profiles still in the system that were finalized at the desk
+    approved_profiles = StudentProfile.objects.filter(desk_outcome="approved").count()
+    rejected_profiles = StudentProfile.objects.filter(desk_outcome="rejected").count()
+
+    counts["approved"] = approved_profiles + approved_live
+    counts["rejected"] = rejected_profiles + rejected_live
     counts["remaining"] = counts["waiting"] or 0
-    # Unapproved students still sitting in batch result tables (carry into next notify)
     leftover_n = len(collect_batch_leftovers())
     counts["batch_leftovers"] = leftover_n
     counts["notify_pool"] = (counts["waiting"] or 0) + leftover_n
@@ -490,8 +496,8 @@ class RegisterView(APIView):
             )
             if send_error:
                 message = (
-                    "Account created, but the verification email could not be sent "
-                    f"({send_error}). Use Resend code after checking BREVO settings."
+                    "Account created, but we could not send the verification email yet. "
+                    "Use Resend code in a moment, or check that your Kabale email is correct."
                 )
             return Response(
                 {
@@ -499,7 +505,6 @@ class RegisterView(APIView):
                     "pending_approval": False,
                     "email": user.email,
                     "email_sent": not bool(send_error),
-                    "send_error": send_error or "",
                     "message": message,
                     "user": {
                         "id": user.id,
@@ -536,8 +541,8 @@ class RegisterView(APIView):
             )
             if send_error:
                 message = (
-                    "Account created, but the verification email could not be sent "
-                    f"({send_error}). Use Resend code after checking BREVO settings."
+                    "Account created, but we could not send the verification email yet. "
+                    "Use Resend code in a moment, or check that your Kabale email is correct."
                 )
             # Do NOT issue tokens — email verify + Main Admin approval still required
             return Response(
@@ -546,7 +551,6 @@ class RegisterView(APIView):
                     "pending_approval": True,
                     "email": user.email,
                     "email_sent": not bool(send_error),
-                    "send_error": send_error or "",
                     "message": message,
                     "user": {
                         "id": user.id,
@@ -683,7 +687,10 @@ class ResendSupervisorEmailCodeView(APIView):
         if send_error:
             return Response(
                 {
-                    "detail": f"Could not send verification email: {send_error}",
+                    "detail": (
+                        "We could not send the verification email just now. "
+                        "Please try again in a moment."
+                    ),
                     "pending_email_verification": True,
                     "email": email,
                 },
@@ -803,14 +810,14 @@ class LoginView(APIView):
             parsed = parse_main_admin_identifier(identifier)
             if not parsed:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             username, _ = parsed
             user_obj = User.objects.filter(username__iexact=username).first()
             if user_obj is None:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             locked = _reject_if_locked(user_obj, password)
@@ -819,7 +826,7 @@ class LoginView(APIView):
             user = authenticate(username=user_obj.username, password=password)
             if user is None or not user.is_main_admin:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             if not getattr(user, "email_verified", False):
@@ -842,14 +849,14 @@ class LoginView(APIView):
             # Only official Kabale staff emails may sign in via email
             if not is_kab_university_email(email):
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
             user_obj = User.objects.filter(email__iexact=email).first()
             if user_obj is None:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
@@ -859,7 +866,7 @@ class LoginView(APIView):
             user = authenticate(username=user_obj.username, password=password)
             if user is None:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             if user.is_main_admin:
@@ -879,7 +886,7 @@ class LoginView(APIView):
                 return Response(data)
             if user.role != User.Role.ADMIN and not user.is_staff:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             if not getattr(user, "email_verified", True):
@@ -916,7 +923,7 @@ class LoginView(APIView):
             )
             if profile is None:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             locked = _reject_if_locked(profile.user, password)
@@ -925,12 +932,12 @@ class LoginView(APIView):
             user = authenticate(username=profile.user.username, password=password)
             if user is None:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             if user.role != User.Role.STUDENT:
                 return Response(
-                    {"detail": "Invalid credentials."},
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
@@ -1057,11 +1064,14 @@ class JoinQueueView(APIView):
         profile.registered_latitude = serializer.validated_data["latitude"]
         profile.registered_longitude = serializer.validated_data["longitude"]
         profile.joined_queue_at = timezone.now()
+        # Fresh join clears any prior desk outcome so counts stay accurate
+        profile.desk_outcome = ""
         profile.save(
             update_fields=[
                 "registered_latitude",
                 "registered_longitude",
                 "joined_queue_at",
+                "desk_outcome",
             ]
         )
 
@@ -1627,7 +1637,12 @@ class CompleteVerificationView(APIView):
             QueueEntry.Status.REJECTED,
         ):
             return Response(
-                {"detail": f"Already finalized as {entry.status}."},
+                {
+                    "detail": (
+                        "This visit was already completed "
+                        f"({entry.status.replace('_', ' ')})."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1655,9 +1670,12 @@ class CompleteVerificationView(APIView):
 
         try:
             if decision in ("approved", "rejected"):
-                # Record desk outcome, then leave the live queue + batch result table.
+                # Record desk outcome on the profile (survives leaving the live queue).
                 CampusSettings.ensure_lifetime_columns()
                 campus = CampusSettings.get_solo()
+                profile = entry.student
+                profile.desk_outcome = decision
+                profile.save(update_fields=["desk_outcome"])
                 if decision == "approved":
                     campus.lifetime_approved = int(campus.lifetime_approved or 0) + 1
                     campus.save(update_fields=["lifetime_approved", "updated_at"])
@@ -2102,36 +2120,97 @@ def _main_admin_manageable_target(request, user_id):
     return target, None
 
 
-def _permanently_delete_user(target: User) -> str:
-    """Delete user and related KabQue data (profile, queue, logs)."""
+def _permanently_delete_user(target: User) -> tuple[str, dict]:
+    """
+    Delete user and related KabQue data (profile, queue row, notification links).
+
+    Returns (message, fresh build_queue_counts()).
+    Live desk totals (Total / To schedule / Notified / Checked in / Approved)
+    recompute from remaining QueueEntry + StudentProfile.desk_outcome rows.
+    """
     role_label = "student" if target.role == User.Role.STUDENT else "supervisor"
     label = target.email or target.username
+    batch_ids: set[int] = set()
+    removed_from_queue = False
+    prior_status = ""
+
     if target.role == User.Role.STUDENT:
         try:
             label = target.profile.registration_number
         except StudentProfile.DoesNotExist:
             pass
 
-    if hasattr(target, "profile"):
-        try:
-            profile = target.profile
-        except StudentProfile.DoesNotExist:
-            profile = None
-        if profile is not None:
-            try:
-                entry = profile.queue_entry
-            except QueueEntry.DoesNotExist:
-                entry = None
-            if entry is not None:
-                NotificationLog.ensure_nullable_queue_entry()
-                NotificationLog.objects.filter(queue_entry_id=entry.id).update(
-                    queue_entry=None
-                )
-                entry.delete()
+    try:
+        profile = target.profile
+    except StudentProfile.DoesNotExist:
+        profile = None
 
-    # Cascades StudentProfile; NotificationBatch.created_by is SET_NULL
+    if profile is not None:
+        try:
+            entry = profile.queue_entry
+        except QueueEntry.DoesNotExist:
+            entry = None
+
+        if entry is not None:
+            prior_status = entry.status or ""
+            batch_ids = set(batch_ids_for_entry(entry.id) or [])
+            NotificationLog.ensure_nullable_queue_entry()
+            NotificationLog.objects.filter(queue_entry_id=entry.id).update(
+                queue_entry=None
+            )
+            entry.delete()
+            removed_from_queue = True
+
+        # Safety: no orphan queue rows for this profile
+        orphan_ids = list(
+            QueueEntry.objects.filter(student_id=profile.pk).values_list("id", flat=True)
+        )
+        if orphan_ids:
+            for oid in orphan_ids:
+                batch_ids.update(batch_ids_for_entry(oid) or [])
+            NotificationLog.ensure_nullable_queue_entry()
+            NotificationLog.objects.filter(queue_entry_id__in=orphan_ids).update(
+                queue_entry=None
+            )
+            QueueEntry.objects.filter(id__in=orphan_ids).delete()
+            removed_from_queue = True
+
+        # Keep CampusSettings lifetime tallies aligned with desk_outcome removes
+        outcome = (profile.desk_outcome or "").strip()
+        if outcome in ("approved", "rejected"):
+            CampusSettings.ensure_lifetime_columns()
+            campus = CampusSettings.get_solo()
+            if outcome == "approved":
+                campus.lifetime_approved = max(0, int(campus.lifetime_approved or 0) - 1)
+                campus.save(update_fields=["lifetime_approved", "updated_at"])
+            else:
+                campus.lifetime_rejected = max(0, int(campus.lifetime_rejected or 0) - 1)
+                campus.save(update_fields=["lifetime_rejected", "updated_at"])
+
+    # Cascades StudentProfile (and thereby desk_outcome) — Approved count shrinks
     target.delete()
-    return f"{role_label.capitalize()} {label} permanently deleted."
+
+    # Keep remaining batch tables and waiting order consistent.
+    # Use savepoints so a compact failure cannot abort the delete transaction.
+    for bid in batch_ids:
+        try:
+            with transaction.atomic():
+                recompact_batch_positions(bid)
+        except Exception:
+            pass
+    if removed_from_queue:
+        clear_waiting_batch_numbers()
+        renumber_queue_positions()
+
+    counts = build_queue_counts()
+    status_note = ""
+    if prior_status:
+        status_note = f" Removed from live queue (was {prior_status})."
+    elif removed_from_queue:
+        status_note = " Removed from live queue."
+
+    message = f"{role_label.capitalize()} {label} permanently deleted.{status_note}"
+    return message, counts
 
 
 class MainAdminOverviewView(APIView):
@@ -2326,5 +2405,11 @@ class MainAdminDeleteUserView(APIView):
         if err:
             return err
 
-        message = _permanently_delete_user(target)
-        return Response({"message": message, "deleted_user_id": serializer.validated_data["user_id"]})
+        message, counts = _permanently_delete_user(target)
+        return Response(
+            {
+                "message": message,
+                "deleted_user_id": serializer.validated_data["user_id"],
+                "counts": counts,
+            }
+        )

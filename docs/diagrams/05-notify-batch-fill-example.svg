@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560">
   <rect width="1000" height="560" fill="#ffffff"/>
-  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 5  How size N fills</text>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue ï¿½ Module 5  How size N fills</text>
   <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Example: supervisor requests N = 10</text>
 
   <!-- Example boxes -->
@@ -33,7 +33,7 @@
   <text x="60" y="385" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">1. Leftovers always fill seats before new waiters.</text>
   <text x="60" y="410" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">2. Everyone in this notify gets a fresh contiguous number 1&N (including carry-overs).</text>
   <text x="60" y="435" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">3. If N &gt; available pool, notify the whole pool and show a shortage message.</text>
-  <text x="60" y="460" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">4. Channel = email · SMS · or both (Brevo + MySMSGate).</text>
+  <text x="60" y="460" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">4. Channel = email ï¿½ SMS ï¿½ or both (Brevo + MySMSGate).</text>
 
   <text x="40" y="530" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/05-notify-batch-fill-example.svg</text>
 </svg>

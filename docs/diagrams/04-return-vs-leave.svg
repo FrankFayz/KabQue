@@ -2,7 +2,7 @@
   <title id="title">KabQue  Return to waiting vs Leave queue</title>
   <desc id="desc">Side-by-side comparison of the two student deferral actions.</desc>
   <rect width="960" height="640" fill="#ffffff"/>
-  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 4  Return vs Leave</text>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue ï¿½ Module 4  Return vs Leave</text>
   <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Two different exits from a scheduled day</text>
 
   <!-- Left column -->
@@ -15,7 +15,7 @@
   <text x="60" y="250" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">checked in / skipped) but cannot attend.</text>
 
   <text x="60" y="290" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">What happens</text>
-  <text x="60" y="312" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Status ’ waiting</text>
+  <text x="60" y="312" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Status ï¿½ waiting</text>
   <text x="60" y="332" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Clear day, code, batch number</text>
   <text x="60" y="352" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Detach from batch table</text>
   <text x="60" y="372" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" created_at = now (back of line)</text>

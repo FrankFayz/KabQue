@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640">
   <rect width="960" height="640" fill="#ffffff"/>
-  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 1  Auth &amp; Registration</text>
-  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">One form · backend decides the role</text>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue ï¿½ Module 1  Auth &amp; Registration</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">One form ï¿½ backend decides the role</text>
   <defs><marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#334455"/></marker></defs>
   <rect x="330" y="100" width="300" height="56" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
   <text x="480" y="125" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Enter identifier + password</text>
@@ -15,7 +15,7 @@
   <rect x="40" y="320" width="240" height="90" rx="6" fill="#e8f6ee" stroke="#1a7a4c"/>
   <text x="160" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Student</text>
   <text x="160" y="372" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Registration number</text>
-  <text x="160" y="392" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">’ JWT ’ /student</text>
+  <text x="160" y="392" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">ï¿½ JWT ï¿½ /student</text>
   <rect x="360" y="320" width="240" height="90" rx="6" fill="#fff4e5" stroke="#d97706"/>
   <text x="480" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Supervisor</text>
   <text x="480" y="372" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">@kab.ac.ug email</text>
@@ -23,9 +23,9 @@
   <rect x="680" y="320" width="240" height="90" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
   <text x="800" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Main Admin</text>
   <text x="800" y="372" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Username with #@admin@#</text>
-  <text x="800" y="392" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">’ JWT ’ /main-admin</text>
+  <text x="800" y="392" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">ï¿½ JWT ï¿½ /main-admin</text>
   <rect x="200" y="460" width="560" height="80" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
-  <text x="480" y="495" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Tokens: access 12h · refresh 7d · stored in browser localStorage</text>
-  <text x="480" y="518" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">APIs: /auth/register · /auth/login · /auth/refresh · /auth/me</text>
+  <text x="480" y="495" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Tokens: access 12h ï¿½ refresh 7d ï¿½ stored in browser localStorage</text>
+  <text x="480" y="518" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">APIs: /auth/register ï¿½ /auth/login ï¿½ /auth/refresh ï¿½ /auth/me</text>
   <text x="40" y="600" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/01-auth-registration.svg</text>
 </svg>

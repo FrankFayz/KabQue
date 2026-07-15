@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520">
   <rect width="1000" height="520" fill="#ffffff"/>
-  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 6  Outcomes compared</text>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue ï¿½ Module 6  Outcomes compared</text>
   <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">What each desk button does</text>
 
   <rect x="40" y="100" width="880" height="36" fill="#0b2a4a"/>
@@ -14,14 +14,14 @@
     <rect x="40" y="136" width="880" height="50" fill="#e8f6ee"/>
     <text x="60" y="166" font-weight="700">Approve</text>
     <text x="200" y="166">Removed</text>
-    <text x="380" y="166">Leaves · recompact</text>
+    <text x="380" y="166">Leaves ï¿½ recompact</text>
     <text x="560" y="166">+1 approved</text>
     <text x="760" y="166">Must re-join if needed</text>
 
     <rect x="40" y="186" width="880" height="50" fill="#fde8e8"/>
     <text x="60" y="216" font-weight="700">Reject</text>
     <text x="200" y="216">Removed</text>
-    <text x="380" y="216">Leaves · recompact</text>
+    <text x="380" y="216">Leaves ï¿½ recompact</text>
     <text x="560" y="216">+1 rejected</text>
     <text x="760" y="216">Must re-join if needed</text>
 

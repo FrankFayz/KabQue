@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="760" viewBox="0 0 1000 760">
   <rect width="1000" height="760" fill="#ffffff"/>
-  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 6  Verify &amp; Complete</text>
-  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Desk: secret code ’ check-in ’ approve / reject / no-show</text>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue ï¿½ Module 6  Verify &amp; Complete</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Desk: secret code ï¿½ check-in ï¿½ approve / reject / no-show</text>
   <defs>
     <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
       <path d="M0,0 L10,4 L0,8 Z" fill="#334455"/>
@@ -18,8 +18,8 @@
   <line x1="500" y1="241" x2="500" y2="280" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
 
   <rect x="300" y="280" width="400" height="56" rx="6" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
-  <text x="500" y="305" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Checked in · profile shown</text>
-  <text x="500" y="324" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Day check · queue # · faculty · contacts</text>
+  <text x="500" y="305" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Checked in ï¿½ profile shown</text>
+  <text x="500" y="324" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Day check ï¿½ queue # ï¿½ faculty ï¿½ contacts</text>
   <line x1="500" y1="336" x2="500" y2="380" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
 
   <rect x="340" y="380" width="320" height="40" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
@@ -45,8 +45,8 @@
   <text x="860" y="546" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">End-of-day reschedule</text>
 
   <rect x="80" y="610" width="840" height="80" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
-  <text x="100" y="645" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Approve/Reject: lifetime counts bump · batch positions recompact · student gone from desk lists.</text>
-  <text x="100" y="668" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">No-show: status=skipped · can verify again later with same code ’ check-in again.</text>
+  <text x="100" y="645" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Approve/Reject: lifetime counts bump ï¿½ batch positions recompact ï¿½ student gone from desk lists.</text>
+  <text x="100" y="668" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">No-show: status=skipped ï¿½ can verify again later with same code ï¿½ check-in again.</text>
 
   <text x="40" y="735" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/06-verify-complete-flow.svg</text>
 </svg>

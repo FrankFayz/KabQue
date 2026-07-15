@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, setAuth } from '../../api';
+import { api, friendlyUserMessage, setAuth } from '../../api';
 import { isValidE164 } from '../../constants/eastAfricaPhones';
 import { captureCampusLocation } from '../../geo/campusLocation';
 import Alert from '../ui/Alert';
@@ -7,23 +7,21 @@ import GpsPinIcon from '../ui/GpsPinIcon';
 import Panel from '../ui/Panel';
 import PhoneInput from '../ui/PhoneInput';
 
-function scrubError(message) {
-  const text = String(message || '');
-  if (
-    /<!doctype/i.test(text) ||
-    /<html/i.test(text) ||
-    /Server Error \(500\)/i.test(text)
-  ) {
-    return 'Could not join the queue right now. Please try again.';
-  }
-  return text;
-}
-
 function locationErrorText(err) {
   const loc = err?.data?.location;
-  if (typeof loc === 'string' && loc.trim()) return loc;
-  if (Array.isArray(loc) && loc.length) return loc.map(String).join(' ');
-  return scrubError(err?.message || 'Unable to confirm your location.');
+  if (typeof loc === 'string' && loc.trim()) {
+    return friendlyUserMessage(loc, 'We could not confirm you are on campus.');
+  }
+  if (Array.isArray(loc) && loc.length) {
+    return friendlyUserMessage(
+      loc.map(String).join(' '),
+      'We could not confirm you are on campus.'
+    );
+  }
+  return friendlyUserMessage(
+    err?.message,
+    'We could not confirm you are on campus. Try outdoors with GPS on.'
+  );
 }
 
 function buttonLabel(phase) {
@@ -99,7 +97,9 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
       setInfo(editing === 'email' ? 'Email updated.' : 'SMS number updated.');
       onProfileUpdated?.(data);
     } catch (err) {
-      setError(scrubError(err.message));
+      setError(
+        friendlyUserMessage(err.message, 'Could not join the queue right now. Please try again.')
+      );
     } finally {
       setSavingContact(false);
     }

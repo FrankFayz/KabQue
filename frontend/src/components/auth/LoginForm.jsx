@@ -54,7 +54,9 @@ export default function LoginForm() {
       });
       setAuth(data);
       if (!data?.user) {
-        setError('Sign in succeeded but no user was returned. Try again.');
+        setError(
+          'Sign-in almost worked, but we could not load your account. Please try again.'
+        );
         return;
       }
       navigate(homePathFor(data.user));
@@ -62,7 +64,11 @@ export default function LoginForm() {
       if (err?.data?.pending_email_verification) {
         const submitId = normalizeSignInIdentifier(identifier);
         setVerifyEmail(err.data.email || identifier.trim());
-        setVerifyMessage(err.data.detail || err.message || '');
+        setVerifyMessage(
+          err.message ||
+            err.data.detail ||
+            'Please verify your email with the code we sent you.'
+        );
         setVerifyVariant(
           submitId.includes('#@admin@#') || identifier.includes('#@admin@#')
             ? 'main_admin'
@@ -72,12 +78,13 @@ export default function LoginForm() {
       }
       if (err?.data?.pending_approval) {
         setInfo(
-          err.data.detail ||
+          err.message ||
+            err.data.detail ||
             'Your email is verified. Wait for approval before signing in.'
         );
         return;
       }
-      setError(err.message);
+      setError(err.message || 'Could not sign in. Please try again.');
     } finally {
       setLoading(false);
     }

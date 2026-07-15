@@ -117,6 +117,15 @@ class StudentProfile(models.Model):
     )
     registered_at = models.DateTimeField(auto_now_add=True)
     joined_queue_at = models.DateTimeField(null=True, blank=True)
+    # Desk outcome after approve/reject (survives leaving the live queue).
+    # Used so Main Admin delete correctly updates Approved / Rejected counts.
+    desk_outcome = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="approved | rejected | empty",
+    )
 
     @property
     def is_profile_complete(self) -> bool:

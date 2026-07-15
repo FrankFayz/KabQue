@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640">
   <rect width="1000" height="640" fill="#ffffff"/>
-  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 5  Desk context (Notify Batch)</text>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue ï¿½ Module 5  Desk context (Notify Batch)</text>
   <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Where this sits on the supervisor console (/admin)</text>
 
   <rect x="40" y="100" width="920" height="70" rx="6" fill="#0b2a4a"/>
-  <text x="60" y="142" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="600" fill="#ffffff">Supervisor desk · stats · analytics · tools</text>
+  <text x="60" y="142" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="600" fill="#ffffff">Supervisor desk ï¿½ stats ï¿½ analytics ï¿½ tools</text>
 
   <rect x="40" y="190" width="280" height="120" rx="6" fill="#fff8db" stroke="#c9a000" stroke-width="2"/>
   <text x="180" y="230" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Notify next batch</text>
   <text x="180" y="255" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">THIS MODULE</text>
-  <text x="180" y="280" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">N · date · channel</text>
+  <text x="180" y="280" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">N ï¿½ date ï¿½ channel</text>
 
   <rect x="340" y="190" width="280" height="120" rx="6" fill="#e8f1fb" stroke="#0b5cab"/>
   <text x="480" y="230" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Verify &amp; complete</text>
@@ -23,8 +23,8 @@
 
   <rect x="40" y="340" width="920" height="140" rx="6" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
   <text x="60" y="380" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" fill="#0b2a4a">Live batch result table (output of Notify)</text>
-  <text x="60" y="410" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Shows students just notified · queue # · secret code · delivery status</text>
-  <text x="60" y="435" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Approved students leave this table · leftovers stay for end-of-day reschedule</text>
+  <text x="60" y="410" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Shows students just notified ï¿½ queue # ï¿½ secret code ï¿½ delivery status</text>
+  <text x="60" y="435" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Approved students leave this table ï¿½ leftovers stay for end-of-day reschedule</text>
   <text x="60" y="460" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Also refreshed via GET /admin/batch/active/</text>
 
   <rect x="40" y="510" width="440" height="70" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
