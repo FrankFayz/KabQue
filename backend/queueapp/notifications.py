@@ -55,9 +55,9 @@ def build_approval_sms(
     date_str = scheduled_date.strftime("%d %b %Y")
     first = (full_name or "student").strip().split()[0]
     return (
-        f"KabQue: Hi {first}, report for document approval on {date_str}. "
-        f"Reg {registration_number}, queue number #{position}. "
-        f"SECRET CODE: {secret_code}. Do not share. — Kabale University"
+        f"KabQue: Hi {first}, report {date_str}. "
+        f"Reg {registration_number} #{position}. "
+        f"CODE: {secret_code}. Do not share. — KAB"
     )
 
 
@@ -206,14 +206,17 @@ def _mysmsgate_hint(status_code: int, detail: str) -> str:
         or "offline" in lower
         or "not connected" in lower
         or "no online" in lower
+        or "device not found" in lower
     ):
-        return "MySMSGate device offline — open the app on the gateway phone"
+        return "MySMSGate device offline — open the app on the gateway phone and keep it online"
     if "sim" in lower or "slot" in lower:
-        return "Wrong SIM slot on server (use 0 for SIM 1, or leave blank for auto)"
-    if "phone" in lower or "number" in lower or "invalid to" in lower:
-        return "Invalid recipient phone"
+        return "Wrong SIM slot on server (clear MYSMSGATE_SIM_SLOT, or use 0 for SIM 1)"
+    if "phone" in lower or "number" in lower or "invalid to" in lower or "recipient" in lower:
+        return "Invalid recipient phone on student profile"
+    if "balance" in lower or "credit" in lower or "quota" in lower:
+        return "MySMSGate account limit reached — check the dashboard"
     if detail:
-        return detail[:120]
+        return detail[:160]
     return "SMS send failed"
 
 
@@ -247,6 +250,56 @@ def _parse_optional_sim_slot(raw) -> int | None:
     return None
 
 
+def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, int, str]:
+    """POST JSON to MySMSGate. Returns (ok, status_code, error_or_empty)."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            parsed = None
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    parsed = None
+            if _mysmsgate_accepted(resp.status, parsed):
+                logger.info(
+                    "MySMSGate accepted SMS to %s (HTTP %s, status=%s, keys=%s)",
+                    payload.get("to") or payload.get("number"),
+                    resp.status,
+                    (parsed or {}).get("status", "ok"),
+                    sorted(k for k in payload if k not in ("to", "number", "message")),
+                )
+                return True, resp.status, ""
+            return (
+                False,
+                resp.status,
+                _mysmsgate_hint(resp.status, _parse_mysmsgate_error(raw or "")),
+            )
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        logger.error(
+            "MySMSGate SMS failed (%s) payload_keys=%s: %s",
+            exc.code,
+            sorted(payload.keys()),
+            detail,
+        )
+        return False, exc.code, _mysmsgate_hint(exc.code, _parse_mysmsgate_error(detail, detail))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("MySMSGate SMS network error")
+        return False, 0, str(exc)[:160]
+
+
 def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
     if not api_key:
@@ -262,96 +315,54 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         getattr(settings, "MYSMSGATE_API_URL", "") or "https://mysmsgate.net/api/v1/send"
     ).strip()
 
-    base_payload = {
-        "to": to_phone,
-        "message": message[:1000],
-    }
     device_id = (getattr(settings, "MYSMSGATE_DEVICE_ID", "") or "").strip()
     configured_slot = _parse_optional_sim_slot(
         getattr(settings, "MYSMSGATE_SIM_SLOT", None)
     )
+    text = message[:1000]
 
-    def with_slot_fields(slot: int) -> dict:
-        # Official docs use `slot`; some MySMSGate examples use `sim_slot`.
-        return {"slot": slot, "sim_slot": slot}
-
-    # Prefer auto SIM first. A hard-coded SIM_SLOT=1 (SIM 2) on a single-SIM
-    # phone is the usual reason email works and SMS "silently" fails.
-    attempts: list[dict] = []
+    # Official shape first: {to, message}. Then device. Slot last (and only if set).
+    # Never force SIM 2 — empty SIM slot = auto.
+    attempts: list[dict] = [
+        {"to": to_phone, "message": text},
+    ]
     if device_id:
-        attempts.append({"device_id": device_id})
-    attempts.append({})  # first online device, auto SIM
-    if device_id and configured_slot is not None:
-        attempts.append({"device_id": device_id, **with_slot_fields(configured_slot)})
+        attempts.append({"to": to_phone, "message": text, "device_id": device_id})
     if configured_slot is not None:
-        attempts.append(with_slot_fields(configured_slot))
+        attempts.append({"to": to_phone, "message": text, "slot": configured_slot})
+        if device_id:
+            attempts.append(
+                {
+                    "to": to_phone,
+                    "message": text,
+                    "device_id": device_id,
+                    "slot": configured_slot,
+                }
+            )
 
-    # De-dupe identical payloads while keeping order
+    # De-dupe
     seen = set()
-    unique_attempts = []
-    for extra in attempts:
-        key = tuple(sorted(extra.items()))
+    unique: list[dict] = []
+    for payload in attempts:
+        key = tuple(sorted((k, str(v)) for k, v in payload.items()))
         if key in seen:
             continue
         seen.add(key)
-        unique_attempts.append(extra)
+        unique.append(payload)
 
     last_error = "SMS send failed"
-    for extra in unique_attempts:
-        payload = {**base_payload, **extra}
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            endpoint,
-            data=data,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-                parsed = None
-                if raw:
-                    try:
-                        parsed = json.loads(raw)
-                    except json.JSONDecodeError:
-                        parsed = None
-                if _mysmsgate_accepted(resp.status, parsed):
-                    logger.info(
-                        "MySMSGate accepted SMS to %s (HTTP %s, status=%s, opts=%s)",
-                        to_phone,
-                        resp.status,
-                        (parsed or {}).get("status", "ok"),
-                        extra or "auto",
-                    )
-                    return True, ""
-                last_error = _mysmsgate_hint(
-                    resp.status,
-                    _parse_mysmsgate_error(raw or ""),
-                )
-                continue
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            parsed_detail = _parse_mysmsgate_error(detail, detail)
-            last_error = _mysmsgate_hint(exc.code, parsed_detail)
-            logger.error(
-                "MySMSGate SMS failed to %s (%s, opts=%s): %s",
-                to_phone,
-                exc.code,
-                extra or "auto",
-                detail,
-            )
-            continue
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "MySMSGate SMS failed to %s (opts=%s)", to_phone, extra or "auto"
-            )
-            last_error = str(exc)[:120]
-            continue
+    for payload in unique:
+        ok, _code, err = _mysmsgate_post(endpoint, api_key, payload)
+        if ok:
+            return True, ""
+        if err:
+            last_error = err
 
+    if "offline" not in last_error.lower() and "api key" not in last_error.lower():
+        last_error = (
+            f"{last_error}. Keep the MySMSGate Android app open and online, "
+            "then try SMS again."
+        )
     return False, last_error
 
 

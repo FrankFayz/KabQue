@@ -174,11 +174,13 @@ export default function AdminDashboard() {
       });
       setNotifyResult(data);
       if (data.sms_failed) {
-        const why = !data.sms_configured
-          ? ' SMS is not set up on the server yet.'
-          : ' Check student phone numbers or try again later.';
+        const reason = Array.isArray(data.sms_errors) && data.sms_errors.length
+          ? ` Reason: ${data.sms_errors[0]}`
+          : !data.sms_configured
+            ? ' SMS is not set up on the server yet.'
+            : ' Open MySMSGate on the gateway phone and keep it online.';
         setNotifyMessage(
-          `Batch sent. Emails sent: ${data.emails_sent ?? 0}. SMS failed for ${data.sms_failed} student(s).${why}`
+          `Batch sent. Emails: ${data.emails_sent ?? 0}. SMS failed for ${data.sms_failed} student(s).${reason}`
         );
       } else {
         setNotifyMessage(

@@ -267,8 +267,13 @@ export default function BatchResultTable({
       {smsFailed ? (
         <Alert>
           SMS could not be delivered for {result.sms_failed} student
-          {result.sms_failed === 1 ? '' : 's'}. Email may still have gone through —
-          check contacts or try again later.
+          {result.sms_failed === 1 ? '' : 's'}
+          {Array.isArray(result.sms_errors) && result.sms_errors[0]
+            ? `: ${result.sms_errors[0]}`
+            : '. Open the MySMSGate app on the gateway phone and keep it online.'}
+          {Number(result.emails_sent || 0) > 0
+            ? ' Email may still have gone through.'
+            : ''}
         </Alert>
       ) : null}
 
