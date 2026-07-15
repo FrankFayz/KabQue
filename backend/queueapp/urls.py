@@ -6,6 +6,31 @@ from . import views
 urlpatterns = [
     path("auth/register/", views.RegisterView.as_view(), name="register"),
     path("auth/login/", views.LoginView.as_view(), name="login"),
+    path(
+        "auth/verify-supervisor-email/",
+        views.VerifySupervisorEmailView.as_view(),
+        name="verify_supervisor_email",
+    ),
+    path(
+        "auth/resend-supervisor-code/",
+        views.ResendSupervisorEmailCodeView.as_view(),
+        name="resend_supervisor_code",
+    ),
+    path(
+        "auth/forgot-password/",
+        views.ForgotPasswordView.as_view(),
+        name="forgot_password",
+    ),
+    path(
+        "auth/reset-password/",
+        views.ResetPasswordView.as_view(),
+        name="reset_password",
+    ),
+    path(
+        "auth/resend-reset-code/",
+        views.ResendPasswordResetView.as_view(),
+        name="resend_reset_code",
+    ),
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me/", views.MeView.as_view(), name="me"),
     path("student/queue/", views.StudentQueueStatusView.as_view(), name="student_queue"),

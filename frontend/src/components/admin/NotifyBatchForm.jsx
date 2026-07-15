@@ -25,7 +25,7 @@ export default function NotifyBatchForm({
   return (
     <Panel title="Notify next batch">
       <form onSubmit={onSubmit} className="stack-form">
-        <div className="notify-remaining-banner">
+        <div className={`notify-remaining-banner${pool > 0 ? ' has-pool' : ''}`}>
           <span className="label">Available to schedule</span>
           <strong>{pool}</strong>
           <span className="notify-pool-breakdown">
@@ -35,6 +35,12 @@ export default function NotifyBatchForm({
               ? `${waiting} waiting joiner${waiting === 1 ? '' : 's'}`
               : null}
           </span>
+          {waiting > 0 ? (
+            <p className="notify-join-hint">
+              New campus joiners land here as waiting. Notify a batch to give them
+              a day, queue numbers, and secret codes.
+            </p>
+          ) : null}
         </div>
 
         <label>

@@ -1,6 +1,6 @@
 import Hero from '../components/home/Hero';
 import HomeHowItWorks from '../components/home/HomeHowItWorks';
-import HomeFeatures from '../components/home/HomeFeatures';
+import HomeCampus from '../components/home/HomeCampus';
 import HomeFooter from '../components/home/HomeFooter';
 
 export default function Home() {
@@ -8,7 +8,7 @@ export default function Home() {
     <div className="home-page">
       <Hero />
       <HomeHowItWorks />
-      <HomeFeatures />
+      <HomeCampus />
       <HomeFooter />
     </div>
   );

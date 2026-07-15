@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api, getCurrentPosition, setAuth } from '../../api';
+import { api, setAuth } from '../../api';
 import { isValidE164 } from '../../constants/eastAfricaPhones';
+import { captureCampusLocation } from '../../geo/campusLocation';
 import Alert from '../ui/Alert';
 import GpsPinIcon from '../ui/GpsPinIcon';
 import Panel from '../ui/Panel';
@@ -25,10 +26,36 @@ function locationErrorText(err) {
   return scrubError(err?.message || 'Unable to confirm your location.');
 }
 
+function buttonLabel(phase) {
+  if (phase === 'locating') return 'Getting GPS fix…';
+  if (phase === 'sampling') return 'Confirming GPS…';
+  if (phase === 'confirming') return 'Verifying campus…';
+  return 'Join queue';
+}
+
+function statusCopy(phase) {
+  if (phase === 'locating') {
+    return {
+      title: 'Getting GPS fix',
+      body: 'Allow location access. Stay still outdoors for a strong campus fix.',
+    };
+  }
+  if (phase === 'sampling') {
+    return {
+      title: 'Confirming GPS',
+      body: 'Taking a few readings to block fake-location jumps. Stay still…',
+    };
+  }
+  return {
+    title: 'Verifying campus area',
+    body: 'Matching your location to the Kikungiri Campus join zone…',
+  };
+}
+
 export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
-  const [phase, setPhase] = useState('idle'); // idle | locating | confirming | done
+  const [phase, setPhase] = useState('idle'); // idle | locating | sampling | confirming
   const [loading, setLoading] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
   const [phone, setPhone] = useState(profile?.phone || '');
@@ -69,9 +96,7 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
       });
       if (data.user) setAuth({ user: data.user });
       setEditing(null);
-      setInfo(
-        editing === 'email' ? 'Email updated.' : 'SMS number updated.'
-      );
+      setInfo(editing === 'email' ? 'Email updated.' : 'SMS number updated.');
       onProfileUpdated?.(data);
     } catch (err) {
       setError(scrubError(err.message));
@@ -81,23 +106,35 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
   }
 
   async function joinQueue() {
+    if (loading) return;
     setError('');
     setInfo('');
     setLoading(true);
     setPhase('locating');
     try {
-      const loc = await getCurrentPosition();
+      const loc = await captureCampusLocation({
+        onPhase: (next) => setPhase(next),
+      });
       setPhase('confirming');
-      const data = await api('/student/join-queue/', {
+      await api('/student/join-queue/', {
         method: 'POST',
         body: {
           latitude: loc.latitude,
           longitude: loc.longitude,
+          accuracy: loc.accuracy,
+          altitude: loc.altitude,
+          altitude_accuracy: loc.altitude_accuracy,
+          speed: loc.speed,
+          heading: loc.heading,
+          captured_at: loc.captured_at,
+          sample_count: loc.sample_count,
+          sample_spread_m: loc.sample_spread_m,
+          samples: loc.samples,
         },
       });
-      setPhase('done');
-      setInfo('');
-      onJoined?.(data);
+      setInfo('You joined the queue.');
+      setPhase('idle');
+      onJoined?.();
     } catch (err) {
       setError(locationErrorText(err));
       setInfo('');
@@ -107,12 +144,17 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
     }
   }
 
-  const locating = phase === 'locating' || phase === 'confirming';
+  const busyGps = loading || phase !== 'idle';
   const savedEmail = (profile?.email || '').trim();
   const savedPhone = (profile?.phone || '').trim();
+  const status = busyGps ? statusCopy(phase === 'idle' ? 'locating' : phase) : null;
 
   return (
-    <Panel title="Join the queue" className="join-queue-card">
+    <Panel title="Join the queue" className="join-queue-card student-join">
+      <p className="student-join-lede">
+        Confirm your contacts, then join only when you are inside the campus GPS
+        zone. Fake-location apps are blocked when possible.
+      </p>
       {profile?.full_name ? (
         <p className="muted join-queue-name">{profile.full_name}</p>
       ) : null}
@@ -152,6 +194,7 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
                 <button
                   type="button"
                   className="btn btn-ghost btn-tiny"
+                  disabled={busyGps}
                   onClick={() => {
                     setEditing('email');
                     setEmail(savedEmail);
@@ -206,6 +249,7 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
                 <button
                   type="button"
                   className="btn btn-ghost btn-tiny"
+                  disabled={busyGps}
                   onClick={() => {
                     setEditing('phone');
                     setPhone(savedPhone);
@@ -249,10 +293,11 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
         </div>
       </section>
 
-      {locating ? (
+      {status ? (
         <div
           className={`gps-status${phase === 'confirming' ? ' is-confirming' : ''}`}
           role="status"
+          aria-live="polite"
         >
           <div className="gps-status-icon-wrap" aria-hidden="true">
             <span className="gps-pulse" />
@@ -260,38 +305,24 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
             <GpsPinIcon className="gps-status-icon" size={36} />
           </div>
           <div className="gps-status-copy">
-            <strong>
-              {phase === 'locating' ? 'Checking location' : 'Confirming campus area'}
-            </strong>
-            <p>
-              {phase === 'locating'
-                ? 'Allow GPS access so KabQue can verify you are on campus.'
-                : 'Matching your coordinates to the allowed join zone…'}
-            </p>
+            <strong>{status.title}</strong>
+            <p>{status.body}</p>
           </div>
         </div>
       ) : null}
 
       <Alert>{error}</Alert>
-      <Alert variant="info">{!error && !locating ? info : ''}</Alert>
+      <Alert variant="info">{!error && !busyGps ? info : ''}</Alert>
 
       <button
         type="button"
-        className="btn btn-primary btn-join-gps"
+        className={`btn btn-primary btn-join-gps${busyGps ? ' is-busy' : ''}`}
         onClick={joinQueue}
-        disabled={loading || Boolean(editing)}
+        disabled={busyGps || Boolean(editing)}
+        aria-busy={busyGps}
       >
-        {locating ? (
-          <>
-            <GpsPinIcon className="btn-join-gps-icon" size={18} />
-            <span>Checking location…</span>
-          </>
-        ) : (
-          <>
-            <GpsPinIcon className="btn-join-gps-icon" size={18} />
-            <span>Join queue</span>
-          </>
-        )}
+        <GpsPinIcon className="btn-join-gps-icon" size={18} />
+        <span>{buttonLabel(busyGps && phase === 'idle' ? 'locating' : phase)}</span>
       </button>
     </Panel>
   );

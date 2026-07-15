@@ -51,6 +51,16 @@ function GradIcon() {
   );
 }
 
+function isFormComplete(form) {
+  return Boolean(
+    form.full_name.trim() &&
+      form.email.trim() &&
+      form.phone.trim() &&
+      form.faculty &&
+      form.programme
+  );
+}
+
 export default function CompleteProfileCard({ profile, onSaved }) {
   const [form, setForm] = useState({
     full_name: profile?.full_name || '',
@@ -61,6 +71,8 @@ export default function CompleteProfileCard({ profile, onSaved }) {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const ready = isFormComplete(form);
 
   function update(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -73,13 +85,13 @@ export default function CompleteProfileCard({ profile, onSaved }) {
   async function onSubmit(e) {
     e.preventDefault();
     setError('');
-    const email = form.email.trim();
-    const phone = form.phone.trim();
-    if (!email && !phone) {
-      setError('Add an email or telephone so KabQue can notify you.');
+    if (!isFormComplete(form)) {
+      setError('Fill in every field — name, email, telephone, faculty, and programme.');
       return;
     }
-    if (phone && !isValidE164(phone)) {
+    const email = form.email.trim();
+    const phone = form.phone.trim();
+    if (!isValidE164(phone)) {
       setError('Use a valid East African mobile number with country code (e.g. Uganda +256…).');
       return;
     }
@@ -114,8 +126,8 @@ export default function CompleteProfileCard({ profile, onSaved }) {
           <p className="profile-setup-kicker">Fresher profile</p>
           <h2>Complete your details</h2>
           <p>
-            One short form before you join the campus queue. Use the name on your
-            admission letter and a contact we can reach.
+            Fill every field before you join the campus queue. Your email is used
+            for notifications and password resets.
           </p>
         </div>
         <div className="profile-setup-reg">
@@ -126,7 +138,7 @@ export default function CompleteProfileCard({ profile, onSaved }) {
 
       <Alert>{error}</Alert>
 
-      <form className="profile-setup-form" onSubmit={onSubmit}>
+      <form className="profile-setup-form" onSubmit={onSubmit} noValidate>
         <section className="profile-setup-block">
           <div className="profile-setup-block-head">
             <span className="profile-setup-block-icon" aria-hidden="true">
@@ -156,7 +168,7 @@ export default function CompleteProfileCard({ profile, onSaved }) {
             </span>
             <div>
               <h3>Contact for notifications</h3>
-              <p>Email and/or SMS — at least one is required</p>
+              <p>Email and telephone are both required</p>
             </div>
           </div>
           <div className="profile-setup-grid">
@@ -170,6 +182,7 @@ export default function CompleteProfileCard({ profile, onSaved }) {
                 onChange={update('email')}
                 autoComplete="email"
                 placeholder="you@example.com"
+                required
               />
             </label>
             <div className="profile-field phone-field">
@@ -180,6 +193,7 @@ export default function CompleteProfileCard({ profile, onSaved }) {
                 value={form.phone}
                 onChange={(phone) => setForm((f) => ({ ...f, phone }))}
                 placeholder="7XXXXXXXX"
+                required
               />
             </div>
           </div>
@@ -207,8 +221,13 @@ export default function CompleteProfileCard({ profile, onSaved }) {
         <div className="profile-setup-footer">
           <p className="hint">
             After saving, join the queue when you are within the campus GPS zone.
+            Use this email later if you forget your password.
           </p>
-          <button type="submit" className="btn btn-primary profile-setup-submit" disabled={loading}>
+          <button
+            type="submit"
+            className="btn btn-primary profile-setup-submit"
+            disabled={loading || !ready}
+          >
             {loading ? 'Saving profile…' : 'Save and continue'}
           </button>
         </div>

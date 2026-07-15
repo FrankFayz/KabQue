@@ -12,7 +12,7 @@ const KABQUE_LINKS = [
   { label: 'Sign in', to: '/login' },
   { label: 'Create account', to: '/register' },
   { label: 'How it works', href: '#how-it-works' },
-  { label: 'Features', href: '#features' },
+  { label: 'Campus', href: '#campus' },
 ];
 
 export default function HomeFooter() {

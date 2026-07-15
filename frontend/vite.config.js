@@ -9,7 +9,7 @@ export default defineConfig({
     proxy: {
       // Avoid browser CORS by proxying API through the Vite dev server
       '/api': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
       },

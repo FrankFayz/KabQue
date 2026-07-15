@@ -49,6 +49,18 @@ class User(AbstractUser):
         default=True,
         help_text="False until a Main Admin confirms Kabale staff membership.",
     )
+    # Supervisors must confirm ownership of their @kab.ac.ug email before staff approval.
+    email_verified = models.BooleanField(
+        default=True,
+        help_text="False until the supervisor enters the email verification code.",
+    )
+    email_verification_code = models.CharField(max_length=8, blank=True, default="")
+    email_verification_expires_at = models.DateTimeField(null=True, blank=True)
+    email_verification_attempts = models.PositiveSmallIntegerField(default=0)
+    # Forgot-password OTP (hashed) — emailed via Brevo
+    password_reset_code_hash = models.CharField(max_length=64, blank=True, default="")
+    password_reset_expires_at = models.DateTimeField(null=True, blank=True)
+    password_reset_attempts = models.PositiveSmallIntegerField(default=0)
 
     class Meta(AbstractUser.Meta):
         constraints = [
@@ -79,10 +91,12 @@ class User(AbstractUser):
 
     @property
     def is_queue_admin(self) -> bool:
-        """Can operate the supervisor desk (Main Admin or approved supervisor)."""
+        """Can operate the supervisor desk (Main Admin or approved verified supervisor)."""
         if self.is_main_admin:
             return True
         if not self.is_approved:
+            return False
+        if not getattr(self, "email_verified", True):
             return False
         return self.role == self.Role.ADMIN or self.is_staff
 
@@ -106,12 +120,15 @@ class StudentProfile(models.Model):
 
     @property
     def is_profile_complete(self) -> bool:
-        has_contact = bool((self.user.email or "").strip() or (self.user.phone or "").strip())
+        # Email is required (password resets + notifications); phone for SMS.
+        has_email = bool((self.user.email or "").strip())
+        has_phone = bool((self.user.phone or "").strip())
         return bool(
             (self.full_name or "").strip()
             and (self.faculty or "").strip()
             and (self.programme or "").strip()
-            and has_contact
+            and has_email
+            and has_phone
         )
 
     def __str__(self) -> str:

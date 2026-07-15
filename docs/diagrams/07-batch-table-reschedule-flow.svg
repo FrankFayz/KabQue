@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="720" viewBox="0 0 1000 720">
+  <rect width="1000" height="720" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 7  Live Batch Table &amp; Reschedule</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Who stays · who leaves · end-of-day move to a new day</text>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#334455"/>
+    </marker>
+  </defs>
+
+  <rect x="300" y="95" width="400" height="50" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="500" y="125" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Notify Batch creates the live table</text>
+  <line x1="500" y1="145" x2="500" y2="185" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="185" width="480" height="70" rx="6" fill="#fff8db" stroke="#c9a000"/>
+  <text x="500" y="215" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Live batch result table</text>
+  <text x="500" y="238" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677"># · name · status · secret code · delivery</text>
+
+  <line x1="260" y1="220" x2="120" y2="320" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="500" y1="255" x2="500" y2="320" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="740" y1="220" x2="880" y2="320" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="40" y="320" width="200" height="90" rx="6" fill="#e8f6ee" stroke="#1a7a4c"/>
+  <text x="140" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">Approve / Reject</text>
+  <text x="140" y="375" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Leave table</text>
+  <text x="140" y="395" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Numbers recompact</text>
+
+  <rect x="400" y="320" width="200" height="90" rx="6" fill="#e8f1fb" stroke="#0b5cab"/>
+  <text x="500" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">Notified / Checked in</text>
+  <text x="500" y="375" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Stay in table</text>
+  <text x="500" y="395" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Await desk</text>
+
+  <rect x="780" y="320" width="180" height="90" rx="6" fill="#fff4e5" stroke="#d97706"/>
+  <text x="870" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">No-show</text>
+  <text x="870" y="375" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Stay as leftover</text>
+  <text x="870" y="395" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Reschedule candidate</text>
+
+  <line x1="500" y1="410" x2="500" y2="460" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="870" y1="410" x2="620" y2="460" stroke="#334455" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <rect x="250" y="460" width="500" height="70" rx="6" fill="#fff4e5" stroke="#d97706" stroke-width="2"/>
+  <text x="500" y="490" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">End of day: Reschedule remaining</text>
+  <text x="500" y="512" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Count + new date ’ fresh numbers 1N · new codes · notify</text>
+
+  <line x1="500" y1="530" x2="500" y2="570" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="280" y="570" width="440" height="70" rx="6" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="500" y="600" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">New batch table for the new day</text>
+  <text x="500" y="622" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Old table loses those rows · next Notify also picks leftovers first</text>
+
+  <text x="40" y="690" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/07-batch-table-reschedule-flow.svg</text>
+</svg>

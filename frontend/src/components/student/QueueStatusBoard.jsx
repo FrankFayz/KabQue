@@ -40,7 +40,9 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
   async function handleLeave() {
     setLocalError('');
     const ok = window.confirm(
-      'Leave the queue completely? You can join again later from campus.'
+      'Do you really want to leave the queue?\n\n' +
+        'OK — exit the queue.\n' +
+        'Cancel — stay in the queue.'
     );
     if (!ok) return;
     try {
@@ -50,51 +52,69 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
     }
   }
 
+  const facts = [
+    queue.status === 'waiting'
+      ? {
+          label: 'Waiting ahead',
+          value: queue.students_ahead_waiting ?? '—',
+        }
+      : null,
+    {
+      label: 'Scheduled day',
+      value: queue.scheduled_date || 'Not assigned yet',
+    },
+    {
+      label: 'Registration no.',
+      value: queue.student?.registration_number || '—',
+    },
+    {
+      label: 'Faculty',
+      value: queue.student?.faculty || '—',
+    },
+    {
+      label: 'Programme',
+      value: queue.student?.programme || '—',
+    },
+  ].filter(Boolean);
+
   return (
-    <div className="status-board">
-      <div className="status-hero">
-        <span className="label">
-          {hasBatchNumber ? 'Your queue number' : 'Queue status'}
-        </span>
-        {hasBatchNumber ? (
-          <strong className="pos">#{queue.position}</strong>
-        ) : (
-          <strong className="pos pos-pending">Pending</strong>
-        )}
-        <StatusPill status={queue.status} />
+    <div className="status-board student-status">
+      <div className="student-status-hero">
+        <div className="student-status-hero-copy">
+          <span className="label">
+            {hasBatchNumber ? 'Your queue number' : 'Queue status'}
+          </span>
+          {hasBatchNumber ? (
+            <strong className="pos">#{queue.position}</strong>
+          ) : (
+            <strong className="pos pos-pending">Pending</strong>
+          )}
+          <p className="student-status-hero-note">
+            {hasBatchNumber
+              ? 'Present this number with your secret code at the approval desk.'
+              : 'You are in the priority queue. Your number is assigned when the next batch is notified.'}
+          </p>
+        </div>
+        <div className="student-status-pill-wrap">
+          <StatusPill status={queue.status} />
+        </div>
       </div>
 
       {!hasBatchNumber ? (
         <p className="queue-pending-note">
-          You are in the priority queue. Your number will be assigned when the
-          supervisor notifies the next approval batch (in arrival order).
+          Stay reachable by email and SMS. KabQue will notify you in arrival order.
         </p>
       ) : null}
 
-      <div className="status-grid">
-        {queue.status === 'waiting' ? (
-          <div>
-            <span className="label">Waiting ahead</span>
-            <strong>{queue.students_ahead_waiting ?? '—'}</strong>
+      <div className="student-fact-grid" role="list">
+        {facts.map((fact) => (
+          <div key={fact.label} className="student-fact" role="listitem">
+            <span className="label">{fact.label}</span>
+            <strong>{fact.value}</strong>
           </div>
-        ) : null}
-        <div>
-          <span className="label">Scheduled day</span>
-          <strong>{queue.scheduled_date || 'Not assigned yet'}</strong>
-        </div>
-        <div>
-          <span className="label">Registration no.</span>
-          <strong>{queue.student?.registration_number}</strong>
-        </div>
-        <div>
-          <span className="label">Faculty</span>
-          <strong>{queue.student?.faculty || '—'}</strong>
-        </div>
-        <div>
-          <span className="label">Programme</span>
-          <strong>{queue.student?.programme || '—'}</strong>
-        </div>
+        ))}
       </div>
+
       <SecretCodeCard code={queue.secret_code} scheduledDate={queue.scheduled_date} />
 
       <div className="queue-manage">
@@ -102,8 +122,8 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
         {canDefer ? (
           <div className="queue-defer">
             <p className="queue-defer-copy">
-              Cannot make this approval day? Return to the waiting queue. KabQue
-              will not let you pick a date — wait for the next supervisor schedule.
+              Cannot make this approval day? Return to waiting — you cannot pick a
+              new date yourself.
             </p>
             <button
               type="button"
@@ -122,7 +142,7 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
             onClick={handleLeave}
             disabled={busy}
           >
-            Leave queue
+            {busy ? 'Leaving…' : 'Exit queue'}
           </button>
         )}
       </div>

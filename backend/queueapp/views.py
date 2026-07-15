@@ -18,7 +18,16 @@ from .notifications import (
 from .auth_utils import (
     is_kab_university_email,
     normalize_email,
+    normalize_registration_number,
+    parse_main_admin_identifier,
     username_is_main_admin,
+)
+from .password_reset import (
+    GENERIC_OK as PASSWORD_RESET_GENERIC_OK,
+    can_resend_reset_code,
+    issue_password_reset_code,
+    resolve_reset_target,
+    verify_and_set_password,
 )
 from .serializers import (
     AdminQueueEntrySerializer,
@@ -26,6 +35,7 @@ from .serializers import (
     CampusSettingsSerializer,
     CompleteStudentProfileSerializer,
     CompleteVerificationSerializer,
+    ForgotPasswordSerializer,
     JoinQueueSerializer,
     LecturerRegisterSerializer,
     LoginSerializer,
@@ -38,9 +48,18 @@ from .serializers import (
     QueueEntrySerializer,
     BatchRescheduleSerializer,
     RescheduleSerializer,
+    ResendPasswordResetSerializer,
+    ResendSupervisorEmailCodeSerializer,
+    ResetPasswordSerializer,
     StudentProfileSerializer,
     StudentRegisterSerializer,
     VerifyCodeSerializer,
+    VerifySupervisorEmailSerializer,
+)
+from .supervisor_email import (
+    can_resend_supervisor_code,
+    issue_supervisor_email_code,
+    verify_supervisor_email_code,
 )
 
 User = get_user_model()
@@ -99,6 +118,7 @@ def tokens_for_user(user):
             "phone": user.phone,
             "role": user.role,
             "is_approved": user.is_approved,
+            "email_verified": bool(getattr(user, "email_verified", True)),
             "is_main_admin": user.is_main_admin,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
@@ -436,7 +456,7 @@ def profile_payload(profile, request=None):
 class RegisterView(APIView):
     """
     One signup form. Backend decides the role:
-    - username containing #@admin@# → Main Admin (system control)
+    - local@kab.ac.ug#@admin@# → Main Admin (system control)
     - registration number → fresher (student dashboard)
     - email ending @kab.ac.ug → supervisor (pending Main Admin approval)
     """
@@ -455,16 +475,44 @@ class RegisterView(APIView):
         password = request.data.get("password")
         account_type = (request.data.get("account_type") or "").strip().lower()
 
-        # Main Admin: username must include the marker string
+        # Main Admin: Kabale email + #@admin@# marker — verify inbox before access
         if username_is_main_admin(identifier) or account_type == "main_admin":
             serializer = MainAdminRegisterSerializer(
                 data={"username": identifier, "password": password}
             )
             serializer.is_valid(raise_exception=True)
             result = serializer.save()
-            data = tokens_for_user(result["user"])
-            data["message"] = "Main Admin account created."
-            return Response(data, status=status.HTTP_201_CREATED)
+            user = result["user"]
+            _, send_error = issue_supervisor_email_code(user)
+            message = (
+                "Account created. We sent a verification code to your Kabale email. "
+                "Enter that code to confirm your address, then sign in."
+            )
+            if send_error:
+                message = (
+                    "Account created, but the verification email could not be sent "
+                    f"({send_error}). Use Resend code after checking BREVO settings."
+                )
+            return Response(
+                {
+                    "pending_email_verification": True,
+                    "pending_approval": False,
+                    "email": user.email,
+                    "email_sent": not bool(send_error),
+                    "send_error": send_error or "",
+                    "message": message,
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "username": user.username,
+                        "role": user.role,
+                        "is_approved": True,
+                        "email_verified": False,
+                        "is_main_admin": True,
+                    },
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
         # Prefer explicit type when provided; otherwise detect from identifier
         if not account_type:
@@ -479,19 +527,33 @@ class RegisterView(APIView):
             serializer = LecturerRegisterSerializer(data=payload)
             serializer.is_valid(raise_exception=True)
             result = serializer.save()
-            # Do NOT issue tokens — supervisor cannot enter the system until approved
+            user = result["user"]
+            _, send_error = issue_supervisor_email_code(user)
+            message = (
+                "Account created. We sent a verification code to your Kabale email. "
+                "Enter that code to confirm the address is yours. "
+                "Approval is still required before you can use the desk."
+            )
+            if send_error:
+                message = (
+                    "Account created, but the verification email could not be sent "
+                    f"({send_error}). Use Resend code after checking BREVO settings."
+                )
+            # Do NOT issue tokens — email verify + Main Admin approval still required
             return Response(
                 {
+                    "pending_email_verification": True,
                     "pending_approval": True,
-                    "message": (
-                        "Account created. A Main Admin must confirm you are "
-                        "Kabale University staff before you can sign in."
-                    ),
+                    "email": user.email,
+                    "email_sent": not bool(send_error),
+                    "send_error": send_error or "",
+                    "message": message,
                     "user": {
-                        "id": result["user"].id,
-                        "email": result["user"].email,
-                        "role": result["user"].role,
+                        "id": user.id,
+                        "email": user.email,
+                        "role": user.role,
                         "is_approved": False,
+                        "email_verified": False,
                     },
                 },
                 status=status.HTTP_201_CREATED,
@@ -525,10 +587,204 @@ class RegisterView(APIView):
         return Response(data, status=status.HTTP_201_CREATED)
 
 
+class VerifySupervisorEmailView(APIView):
+    """Confirm supervisor or Main Admin owns their email via emailed signup code."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = VerifySupervisorEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        code = serializer.validated_data["code"]
+
+        user = User.objects.filter(email__iexact=email).first()
+        if user is None or not (user.is_supervisor or user.is_main_admin):
+            return Response(
+                {"detail": "No account found for that email."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        ok, message = verify_supervisor_email_code(user, code)
+        if not ok:
+            return Response(
+                {"detail": message, "pending_email_verification": True, "email": email},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.refresh_from_db()
+        return Response(
+            {
+                "message": message,
+                "pending_email_verification": False,
+                "pending_approval": (
+                    False if user.is_main_admin else (not user.is_approved)
+                ),
+                "email_verified": True,
+                "email": user.email,
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "username": user.username,
+                    "role": user.role,
+                    "is_approved": user.is_approved,
+                    "email_verified": True,
+                    "is_main_admin": user.is_main_admin,
+                },
+            }
+        )
+
+
+class ResendSupervisorEmailCodeView(APIView):
+    """Resend signup email verification code (rate-limited)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = ResendSupervisorEmailCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+
+        user = User.objects.filter(email__iexact=email).first()
+        if user is None or not (user.is_supervisor or user.is_main_admin):
+            return Response(
+                {"detail": "No account found for that email."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if user.email_verified:
+            if user.is_main_admin:
+                return Response(
+                    {
+                        "detail": "Email already verified. You can sign in.",
+                        "email_verified": True,
+                        "pending_approval": False,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {
+                    "detail": (
+                        "Email already verified. Wait for approval before signing in."
+                    ),
+                    "email_verified": True,
+                    "pending_approval": not user.is_approved,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        allowed, reason = can_resend_supervisor_code(user)
+        if not allowed:
+            return Response(
+                {"detail": reason, "pending_email_verification": True, "email": email},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        _, send_error = issue_supervisor_email_code(user)
+        if send_error:
+            return Response(
+                {
+                    "detail": f"Could not send verification email: {send_error}",
+                    "pending_email_verification": True,
+                    "email": email,
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(
+            {
+                "message": "A new verification code was sent to your email.",
+                "pending_email_verification": True,
+                "email": email,
+            }
+        )
+
+
+class ForgotPasswordView(APIView):
+    """Request a password-reset code (Brevo email). Always returns a generic OK."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data["identifier"]
+
+        user, destination = resolve_reset_target(identifier)
+        if user is None or not destination:
+            return Response({"message": PASSWORD_RESET_GENERIC_OK})
+
+        allowed, reason = can_resend_reset_code(user)
+        if not allowed:
+            return Response(
+                {"detail": reason},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        ok, _err = issue_password_reset_code(user, destination)
+        if not ok:
+            # Soft-fail: same message whether or not email sent (no account leak)
+            return Response({"message": PASSWORD_RESET_GENERIC_OK, "email_sent": False})
+        return Response({"message": PASSWORD_RESET_GENERIC_OK, "email_sent": True})
+
+
+class ResetPasswordView(APIView):
+    """Confirm OTP and set a new password."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data["identifier"]
+        code = serializer.validated_data["code"]
+        new_password = serializer.validated_data["new_password"]
+
+        user, _ = resolve_reset_target(identifier)
+        if user is None:
+            return Response(
+                {"detail": "Invalid or expired reset code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ok, message = verify_and_set_password(user, code, new_password)
+        if not ok:
+            return Response(
+                {"detail": message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"message": message})
+
+
+class ResendPasswordResetView(APIView):
+    """Resend password-reset code (rate-limited). Generic success when eligible."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = ResendPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data["identifier"]
+
+        user, destination = resolve_reset_target(identifier)
+        if user is None or not destination:
+            return Response({"message": PASSWORD_RESET_GENERIC_OK})
+
+        allowed, reason = can_resend_reset_code(user)
+        if not allowed:
+            return Response(
+                {"detail": reason},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        ok, _err = issue_password_reset_code(user, destination)
+        if not ok:
+            return Response({"message": PASSWORD_RESET_GENERIC_OK, "email_sent": False})
+        return Response({"message": PASSWORD_RESET_GENERIC_OK, "email_sent": True})
+
+
 class LoginView(APIView):
     """
     One sign-in form. Backend decides access:
-    - username with #@admin@# → Main Admin
+    - local@kab.ac.ug#@admin@# → Main Admin
     - registration number → fresher
     - @kab.ac.ug email → supervisor (must be approved)
     """
@@ -542,9 +798,16 @@ class LoginView(APIView):
         password = serializer.validated_data["password"]
         user = None
 
-        # Main Admin username path (may or may not contain @ from the marker)
+        # Main Admin: must be Kabale email + #@admin@#
         if username_is_main_admin(identifier):
-            user_obj = User.objects.filter(username__iexact=identifier).first()
+            parsed = parse_main_admin_identifier(identifier)
+            if not parsed:
+                return Response(
+                    {"detail": "Invalid credentials."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            username, _ = parsed
+            user_obj = User.objects.filter(username__iexact=username).first()
             if user_obj is None:
                 return Response(
                     {"detail": "Invalid credentials."},
@@ -558,6 +821,18 @@ class LoginView(APIView):
                 return Response(
                     {"detail": "Invalid credentials."},
                     status=status.HTTP_401_UNAUTHORIZED,
+                )
+            if not getattr(user, "email_verified", False):
+                return Response(
+                    {
+                        "detail": (
+                            "Verify your Kabale email first. Enter the code we sent "
+                            "when you registered, then sign in."
+                        ),
+                        "pending_email_verification": True,
+                        "email": user.email,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
                 )
             data = tokens_for_user(user)
             return Response(data)
@@ -588,6 +863,18 @@ class LoginView(APIView):
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             if user.is_main_admin:
+                if not getattr(user, "email_verified", False):
+                    return Response(
+                        {
+                            "detail": (
+                                "Verify your Kabale email first. Enter the code we sent "
+                                "when you registered, then sign in."
+                            ),
+                            "pending_email_verification": True,
+                            "email": user.email,
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
                 data = tokens_for_user(user)
                 return Response(data)
             if user.role != User.Role.ADMIN and not user.is_staff:
@@ -595,20 +882,35 @@ class LoginView(APIView):
                     {"detail": "Invalid credentials."},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
+            if not getattr(user, "email_verified", True):
+                return Response(
+                    {
+                        "detail": (
+                            "Verify your Kabale email first. Enter the code we sent "
+                            "to your inbox, then wait for Main Admin approval."
+                        ),
+                        "pending_email_verification": True,
+                        "email": user.email,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             if not user.is_approved:
                 return Response(
                     {
                         "detail": (
-                            "Your supervisor account is awaiting Main Admin approval. "
-                            "You cannot access KabQue until you are confirmed as Kabale staff."
+                            "Your email is verified. A Main Admin must still confirm "
+                            "you are Kabale University staff before you can sign in."
                         ),
                         "pending_approval": True,
+                        "email_verified": True,
+                        "email": user.email,
                     },
                     status=status.HTTP_403_FORBIDDEN,
                 )
         else:
+            reg = normalize_registration_number(identifier) or identifier.strip().upper()
             profile = (
-                StudentProfile.objects.filter(registration_number__iexact=identifier)
+                StudentProfile.objects.filter(registration_number__iexact=reg)
                 .select_related("user")
                 .first()
             )
@@ -1750,6 +2052,7 @@ def _main_admin_staff_row(user):
         "full_name": user.get_full_name() or user.username,
         "role": user.role,
         "is_approved": user.is_approved,
+        "email_verified": bool(getattr(user, "email_verified", True)),
         "is_active": user.is_active,
         "is_locked": not user.is_active,
         "date_joined": user.date_joined,
@@ -1757,7 +2060,15 @@ def _main_admin_staff_row(user):
         "faculty": "",
         "programme": "",
         "profile_complete": True,
-        "verification_status": "approved" if user.is_approved else "pending",
+        "verification_status": (
+            "approved"
+            if user.is_approved
+            else (
+                "pending"
+                if getattr(user, "email_verified", True)
+                else "email_unverified"
+            )
+        ),
         "queue_position": None,
         "scheduled_date": None,
     }
@@ -1936,6 +2247,16 @@ class MainAdminApproveSupervisorView(APIView):
         if target.role != User.Role.ADMIN:
             return Response(
                 {"detail": "Only supervisor accounts can be approved."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if approve and not getattr(target, "email_verified", False):
+            return Response(
+                {
+                    "detail": (
+                        "This supervisor has not verified their Kabale email yet. "
+                        "They must enter the email verification code first."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

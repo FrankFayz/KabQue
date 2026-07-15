@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640">
+  <rect width="1000" height="640" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Supervisor signup gates</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Email code first · Main Admin approval last</text>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#334455"/>
+    </marker>
+  </defs>
+
+  <rect x="300" y="100" width="400" height="50" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="500" y="130" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Sign up with @kab.ac.ug + password</text>
+  <line x1="500" y1="150" x2="500" y2="190" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="190" width="480" height="60" rx="6" fill="#fff8db" stroke="#c9a000"/>
+  <text x="500" y="215" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">6-digit code emailed (Brevo)</text>
+  <text x="500" y="235" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">TTL 30 min · resend cooldown 60s</text>
+  <line x1="500" y1="250" x2="500" y2="290" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="290" width="480" height="50" rx="6" fill="#e8f1fb" stroke="#0b5cab"/>
+  <text x="500" y="320" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Supervisor enters code in KabQue</text>
+  <line x1="500" y1="340" x2="500" y2="380" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="280" y="380" width="440" height="50" rx="6" fill="#e8f6ee" stroke="#1a7a4c"/>
+  <text x="500" y="410" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">email_verified = true · still not approved</text>
+  <line x1="500" y1="430" x2="500" y2="470" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="240" y="470" width="520" height="70" rx="6" fill="#fff4e5" stroke="#d97706" stroke-width="2"/>
+  <text x="500" y="500" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Main Admin Approve (final gate)</text>
+  <text x="500" y="522" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Approve disabled until email is verified</text>
+  <line x1="500" y1="540" x2="500" y2="575" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="320" y="575" width="360" height="40" rx="6" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="500" y="600" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b2a4a">Can sign in to supervisor desk</text>
+</svg>

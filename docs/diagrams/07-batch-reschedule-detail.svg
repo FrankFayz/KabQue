@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520">
+  <rect width="1000" height="520" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 7 — Batch reschedule detail</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">POST /admin/batch-reschedule/</text>
+
+  <rect x="40" y="100" width="280" height="160" rx="8" fill="#fff8db" stroke="#c9a000" stroke-width="2"/>
+  <text x="180" y="140" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Source batch</text>
+  <text x="180" y="170" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Students still linked</text>
+  <text x="180" y="190" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">(notified / checked_in / skipped)</text>
+  <text x="180" y="220" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#334455">Supervisor picks count</text>
+  <text x="180" y="240" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#334455">and a new approval date</text>
+
+  <text x="360" y="180" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#0b5cab">?</text>
+
+  <rect x="400" y="100" width="280" height="160" rx="8" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="540" y="140" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">System actions</text>
+  <text x="540" y="170" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">1. Detach from old batch</text>
+  <text x="540" y="190" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">2. Create new NotificationBatch</text>
+  <text x="540" y="210" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">3. Numbers 1 to N + new codes</text>
+  <text x="540" y="230" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">4. Email / SMS again</text>
+
+  <text x="720" y="180" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#0b5cab">?</text>
+
+  <rect x="760" y="100" width="200" height="160" rx="8" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="860" y="150" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">New day table</text>
+  <text x="860" y="180" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Desk continues</text>
+  <text x="860" y="200" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">with new numbers</text>
+  <text x="860" y="230" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">rescheduled flag</text>
+
+  <rect x="40" y="300" width="920" height="140" rx="8" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="60" y="340" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Also remember</text>
+  <text x="60" y="370" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Next Notify Batch still prefers leftovers from any open table before waiting joiners.</text>
+  <text x="60" y="395" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">GET /admin/batch/active/ reloads the newest open batch (or a specific batch_id).</text>
+  <text x="60" y="420" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Empty table stays visible so staff see the day is done (Batch cleared).</text>
+
+  <text x="40" y="490" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/07-batch-reschedule-detail.svg</text>
+</svg>

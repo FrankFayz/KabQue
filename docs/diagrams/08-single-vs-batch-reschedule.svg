@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="480" viewBox="0 0 1000 480">
+  <rect width="1000" height="480" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 8  Single vs batch reschedule</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Two different supervisor tools</text>
+
+  <rect x="40" y="100" width="440" height="280" rx="8" fill="#fff8db" stroke="#c9a000" stroke-width="2"/>
+  <text x="260" y="140" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0b2a4a">Queue table  single</text>
+  <text x="260" y="165" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">POST /admin/reschedule/</text>
+  <text x="70" y="210" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" One student at a time</text>
+  <text x="70" y="235" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Pick a new approval date</text>
+  <text x="70" y="260" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Leaves old batch table</text>
+  <text x="70" y="285" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" New code + email/SMS</text>
+  <text x="70" y="310" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Does not open a new batch panel</text>
+  <text x="70" y="345" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8a6d00">Use for one-off date changes</text>
+
+  <rect x="520" y="100" width="440" height="280" rx="8" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="740" y="140" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0b2a4a">Batch table  many</text>
+  <text x="740" y="165" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">POST /admin/batch-reschedule/</text>
+  <text x="550" y="210" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Up to N remaining leftovers</text>
+  <text x="550" y="235" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Fresh numbers 1 to N</text>
+  <text x="550" y="260" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Creates new NotificationBatch</text>
+  <text x="550" y="285" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" New live batch result table</text>
+  <text x="550" y="310" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" End-of-day carry forward</text>
+  <text x="550" y="345" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#1a7a4c">Use for clearing a days leftovers</text>
+
+  <text x="40" y="440" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/08-single-vs-batch-reschedule.svg</text>
+</svg>

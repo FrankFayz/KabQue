@@ -46,6 +46,31 @@ export default function AuthShell() {
           <Outlet />
         </section>
       </div>
+
+      <footer className="auth-footer">
+        <div className="auth-footer-inner">
+          <img
+            src="/kabale-badge.png"
+            alt=""
+            width={32}
+            height={32}
+            className="auth-footer-badge"
+          />
+          <div className="auth-footer-copy">
+            <p className="auth-footer-brand">
+              KabQue · Kabale University · Knowledge is the Future
+            </p>
+            <p className="auth-footer-meta">
+              Kikungiri Campus ·{' '}
+              <Link to="/">Home</Link>
+              {' · '}
+              <a href="https://www.kab.ac.ug/" target="_blank" rel="noopener noreferrer">
+                kab.ac.ug
+              </a>
+            </p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

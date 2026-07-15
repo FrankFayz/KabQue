@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520">
+  <rect width="1000" height="520" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 6  Outcomes compared</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">What each desk button does</text>
+
+  <rect x="40" y="100" width="880" height="36" fill="#0b2a4a"/>
+  <text x="60" y="123" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Decision</text>
+  <text x="200" y="123" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Live queue</text>
+  <text x="380" y="123" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Batch table</text>
+  <text x="560" y="123" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Lifetime count</text>
+  <text x="760" y="123" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Can return later</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">
+    <rect x="40" y="136" width="880" height="50" fill="#e8f6ee"/>
+    <text x="60" y="166" font-weight="700">Approve</text>
+    <text x="200" y="166">Removed</text>
+    <text x="380" y="166">Leaves · recompact</text>
+    <text x="560" y="166">+1 approved</text>
+    <text x="760" y="166">Must re-join if needed</text>
+
+    <rect x="40" y="186" width="880" height="50" fill="#fde8e8"/>
+    <text x="60" y="216" font-weight="700">Reject</text>
+    <text x="200" y="216">Removed</text>
+    <text x="380" y="216">Leaves · recompact</text>
+    <text x="560" y="216">+1 rejected</text>
+    <text x="760" y="216">Must re-join if needed</text>
+
+    <rect x="40" y="236" width="880" height="50" fill="#fff4e5"/>
+    <text x="60" y="266" font-weight="700">No-show</text>
+    <text x="200" y="266">Stays (skipped)</text>
+    <text x="380" y="266">Stays as leftover</text>
+    <text x="560" y="266">No change</text>
+    <text x="760" y="266">Re-verify or reschedule</text>
+  </g>
+
+  <rect x="40" y="320" width="920" height="120" rx="8" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="60" y="355" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Rule before Approve / Reject</text>
+  <text x="60" y="385" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Student should be checked in via secret code (status notified or checked_in).</text>
+  <text x="60" y="410" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">API blocks approve/reject from waiting or already-final statuses.</text>
+
+  <text x="40" y="490" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/06-verify-outcomes.svg</text>
+</svg>

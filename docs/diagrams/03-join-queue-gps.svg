@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640">
+  <rect width="960" height="640" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 3  Join Queue (GPS)</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Campus geofence before entering the waiting line</text>
+  <defs><marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#334455"/></marker></defs>
+  <rect x="340" y="100" width="280" height="50" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="480" y="130" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Tap Join queue</text>
+  <line x1="480" y1="150" x2="480" y2="190" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="300" y="190" width="360" height="56" rx="6" fill="#fff8db" stroke="#c9a000"/>
+  <text x="480" y="215" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Browser GPS (permission)</text>
+  <text x="480" y="234" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">latitude · longitude ’ server</text>
+  <line x1="480" y1="246" x2="480" y2="290" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="280" y="290" width="400" height="56" rx="6" fill="#e8f1fb" stroke="#0b5cab"/>
+  <text x="480" y="315" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">is_on_campus(distance d radius)?</text>
+  <text x="480" y="334" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Or gps_enforcement = off</text>
+  <line x1="280" y1="318" x2="140" y2="400" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="680" y1="318" x2="820" y2="400" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="40" y="400" width="200" height="80" rx="6" fill="#fde8e8" stroke="#b42318"/>
+  <text x="140" y="435" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b2a4a">Outside zone</text>
+  <text x="140" y="458" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">400 location error</text>
+  <rect x="720" y="400" width="200" height="80" rx="6" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="820" y="430" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b2a4a">Create QueueEntry</text>
+  <text x="820" y="450" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">status=waiting</text>
+  <text x="820" y="468" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">position=null</text>
+  <rect x="220" y="520" width="520" height="50" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="480" y="550" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Queue number assigned later by supervisor Notify Batch</text>
+  <text x="40" y="610" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/03-join-queue-gps.svg</text>
+</svg>

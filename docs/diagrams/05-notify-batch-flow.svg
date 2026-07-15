@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="720" viewBox="0 0 1000 720">
+  <rect width="1000" height="720" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 5  Notify Batch</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Supervisor schedules day · pool = leftovers first + waiting · numbers 1N</text>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#334455"/>
+    </marker>
+  </defs>
+
+  <rect x="320" y="95" width="360" height="56" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="500" y="120" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Supervisor: size N · date · channel</text>
+  <text x="500" y="140" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">POST /admin/notify/</text>
+  <line x1="500" y1="151" x2="500" y2="195" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="280" y="195" width="440" height="56" rx="6" fill="#fff8db" stroke="#c9a000"/>
+  <text x="500" y="220" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Build pool</text>
+  <text x="500" y="240" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Carry leftovers + waiting joiners (arrival order)</text>
+
+  <line x1="320" y1="251" x2="180" y2="320" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="680" y1="251" x2="820" y2="320" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="60" y="320" width="240" height="80" rx="6" fill="#fff4e5" stroke="#d97706"/>
+  <text x="180" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">1) Leftovers first</text>
+  <text x="180" y="372" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Still in batch table</text>
+  <text x="180" y="390" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">notified / checked_in / skipped</text>
+
+  <rect x="700" y="320" width="240" height="80" rx="6" fill="#e8f6ee" stroke="#1a7a4c"/>
+  <text x="820" y="350" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">2) Then waiting</text>
+  <text x="820" y="372" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">FCFS by created_at</text>
+  <text x="820" y="390" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Fill remaining seats</text>
+
+  <line x1="180" y1="400" x2="400" y2="460" stroke="#334455" stroke-width="2"/>
+  <line x1="820" y1="400" x2="600" y2="460" stroke="#334455" stroke-width="2"/>
+  <line x1="500" y1="460" x2="500" y2="490" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="490" width="480" height="70" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="500" y="520" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Assign fresh numbers 1&N</text>
+  <text x="500" y="542" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Secret code · scheduled day · email/SMS · batch result table</text>
+
+  <rect x="60" y="600" width="880" height="70" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="80" y="630" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Creates NotificationBatch + NotificationLog per channel attempt. Carry-overs leave old batch tables; waiters become status=notified.</text>
+  <text x="80" y="652" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">If N &gt; pool ’ notify everyone available and report shortage.</text>
+
+  <text x="40" y="700" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/05-notify-batch-flow.svg</text>
+</svg>

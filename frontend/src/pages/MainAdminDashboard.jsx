@@ -21,6 +21,7 @@ function statusLabel(status) {
     skipped: 'Skipped',
     not_in_queue: 'Not in queue',
     pending: 'Pending approval',
+    email_unverified: 'Email not verified',
   };
   return map[status] || status || '—';
 }
@@ -425,9 +426,28 @@ export default function MainAdminDashboard() {
                     <td>{row.full_name || '—'}</td>
                     <td>
                       <div className="main-admin-status-stack">
-                        <StatusPill status={row.is_approved ? 'approved' : 'pending'}>
-                          {row.is_approved ? 'Approved' : 'Pending approval'}
+                        <StatusPill
+                          status={
+                            row.email_verified === false
+                              ? 'email_unverified'
+                              : row.is_approved
+                                ? 'approved'
+                                : 'pending'
+                          }
+                        >
+                          {row.email_verified === false
+                            ? 'Awaiting email code'
+                            : row.is_approved
+                              ? 'Desk approved'
+                              : 'Awaiting your approval'}
                         </StatusPill>
+                        {row.email_verified !== false ? (
+                          <span className="main-admin-email-ok">Email verified</span>
+                        ) : (
+                          <span className="main-admin-email-wait">
+                            Must verify @kab.ac.ug first
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td>
@@ -455,7 +475,14 @@ export default function MainAdminDashboard() {
                             <button
                               type="button"
                               className="btn btn-primary btn-sm"
-                              disabled={actionBusy === row.id}
+                              disabled={
+                                actionBusy === row.id || row.email_verified === false
+                              }
+                              title={
+                                row.email_verified === false
+                                  ? 'Supervisor must verify their Kabale email first'
+                                  : 'Approve desk access'
+                              }
                               onClick={() => setSupervisorApproval(row.id, true)}
                             >
                               Approve

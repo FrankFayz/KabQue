@@ -9,7 +9,6 @@ import NotifyBatchForm from '../components/admin/NotifyBatchForm';
 import QueueTable from '../components/admin/QueueTable';
 import VerifyCodePanel from '../components/admin/VerifyCodePanel';
 import Alert from '../components/ui/Alert';
-import PageHeader from '../components/ui/PageHeader';
 
 export default function AdminDashboard() {
   const viewingAsMainAdmin = isMainAdmin(getStoredUser());
@@ -47,6 +46,11 @@ export default function AdminDashboard() {
   searchRef.current = search;
   notifyResultRef.current = notifyResult;
 
+  const waitingCount = dash?.counts?.remaining ?? dash?.counts?.waiting ?? 0;
+  const leftoversCount = dash?.counts?.batch_leftovers ?? 0;
+  const schedulePool = waitingCount + leftoversCount;
+  const liveBatchOpen = Boolean(notifyResult?.batch && (notifyResult?.students?.length ?? 0) >= 0);
+
   const loadBatch = useCallback(async (batchId) => {
     try {
       const qs = batchId
@@ -58,7 +62,6 @@ export default function AdminDashboard() {
         setNotifyResult(data);
         return;
       }
-      // Empty remaining — keep panel so supervisor sees "all cleared"
       setNotifyResult((prev) => {
         if (prev?.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
           return prev;
@@ -224,7 +227,6 @@ export default function AdminDashboard() {
       if (data.counts) {
         setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
       }
-      // Approved / rejected leave the batch result table immediately
       if (data.batch) {
         setNotifyResult(data.batch);
       } else if (data.removed_queue_entry_id) {
@@ -276,7 +278,7 @@ export default function AdminDashboard() {
     }
   }
 
-  async function batchReschedule({ batchId, count, scheduledDate }) {
+  async function batchReschedule({ batchId, count, scheduledDate: nextDate }) {
     setRescheduleBusy(true);
     setRescheduleError('');
     setRescheduleMessage('');
@@ -286,7 +288,7 @@ export default function AdminDashboard() {
         body: {
           batch_id: batchId,
           count: Number(count),
-          scheduled_date: scheduledDate,
+          scheduled_date: nextDate,
           channel,
         },
       });
@@ -302,43 +304,83 @@ export default function AdminDashboard() {
     }
   }
 
+  const stageHint =
+    schedulePool > 0
+      ? `${schedulePool} ready to notify · waiting joiners appear on the Live queue as “Queued” until you send a batch`
+      : liveBatchOpen
+        ? 'Verify students with their secret code, then approve or reject'
+        : 'Waiting for freshers to join on campus';
+
   return (
-    <section className="dash">
-      <PageHeader
-        eyebrow={viewingAsMainAdmin ? 'Main Admin · monitoring' : 'Admin desk'}
-        title="KabQue control"
-        action={
-          <div className="dash-actions">
-            {viewingAsMainAdmin ? (
-              <Link to="/main-admin" className="btn btn-secondary">
-                Back to Main Admin
-              </Link>
-            ) : null}
-            {lastSynced && (
-              <span className="dash-refreshed">
-                {refreshing
-                  ? 'Refreshing…'
-                  : `Live · ${lastSynced.toLocaleTimeString()}`}
-              </span>
-            )}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => load({ manual: true })}
-              disabled={refreshing}
-              aria-busy={refreshing}
-            >
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
-        }
-      />
+    <section className="dash desk-dash">
+      <header className="desk-welcome">
+        <div className="desk-welcome-copy">
+          <p className="desk-welcome-kicker">
+            {viewingAsMainAdmin ? 'Main Admin · desk monitor' : 'Supervisor desk'}
+          </p>
+          <h1>KabQue control</h1>
+          <p className="desk-welcome-lede">{stageHint}</p>
+        </div>
+        <div className="desk-welcome-actions">
+          {viewingAsMainAdmin ? (
+            <Link to="/main-admin" className="btn btn-secondary">
+              Back to Main Admin
+            </Link>
+          ) : null}
+          {lastSynced ? (
+            <span className="dash-refreshed">
+              {refreshing ? 'Refreshing…' : `Live · ${lastSynced.toLocaleTimeString()}`}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => load({ manual: true })}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      </header>
+
+      <ol className="desk-flow" aria-label="Desk workflow">
+        <li className={schedulePool > 0 ? 'is-active' : ''}>
+          <span className="desk-flow-n">1</span>
+          <span className="desk-flow-copy">
+            <strong>Waiting</strong>
+            <em>{waitingCount} joiner{waitingCount === 1 ? '' : 's'}</em>
+          </span>
+        </li>
+        <li className={schedulePool > 0 ? 'is-active' : ''}>
+          <span className="desk-flow-n">2</span>
+          <span className="desk-flow-copy">
+            <strong>Notify batch</strong>
+            <em>Assign day + codes</em>
+          </span>
+        </li>
+        <li>
+          <span className="desk-flow-n">3</span>
+          <span className="desk-flow-copy">
+            <strong>Verify</strong>
+            <em>Secret code at desk</em>
+          </span>
+        </li>
+        <li>
+          <span className="desk-flow-n">4</span>
+          <span className="desk-flow-copy">
+            <strong>Complete</strong>
+            <em>Approve or reject</em>
+          </span>
+        </li>
+      </ol>
 
       <Alert>{pageError}</Alert>
       <Alert>{queueError}</Alert>
       <Alert variant="info">
         {!queueError ? queueMessage || refreshNote : ''}
       </Alert>
+
       <AdminStats counts={dash?.counts} />
       <AnalyticsBreakdown
         byFaculty={dash?.by_faculty}
@@ -352,8 +394,8 @@ export default function AdminDashboard() {
           scheduledDate={scheduledDate}
           channel={channel}
           busy={notifyBusy}
-          remaining={dash?.counts?.remaining ?? dash?.counts?.waiting ?? 0}
-          leftovers={dash?.counts?.batch_leftovers ?? 0}
+          remaining={waitingCount}
+          leftovers={leftoversCount}
           error={notifyError}
           message={notifyMessage}
           onBatchSizeChange={setBatchSize}

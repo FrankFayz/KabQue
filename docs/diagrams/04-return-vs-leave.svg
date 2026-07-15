@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640" role="img" aria-labelledby="title desc">
+  <title id="title">KabQue  Return to waiting vs Leave queue</title>
+  <desc id="desc">Side-by-side comparison of the two student deferral actions.</desc>
+  <rect width="960" height="640" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 4  Return vs Leave</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Two different exits from a scheduled day</text>
+
+  <!-- Left column -->
+  <rect x="40" y="100" width="420" height="460" rx="8" fill="#fff8db" stroke="#c9a000" stroke-width="2"/>
+  <text x="250" y="140" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#0b2a4a">Return to waiting</text>
+  <text x="250" y="165" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">API: POST /student/reschedule/</text>
+
+  <text x="60" y="210" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">When</text>
+  <text x="60" y="232" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Student was scheduled (notified /</text>
+  <text x="60" y="250" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">checked in / skipped) but cannot attend.</text>
+
+  <text x="60" y="290" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">What happens</text>
+  <text x="60" y="312" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Status ’ waiting</text>
+  <text x="60" y="332" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Clear day, code, batch number</text>
+  <text x="60" y="352" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Detach from batch table</text>
+  <text x="60" y="372" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" created_at = now (back of line)</text>
+  <text x="60" y="392" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Still in the queue</text>
+
+  <text x="60" y="432" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">Student cannot</text>
+  <text x="60" y="454" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Pick a priority date themselves.</text>
+  <text x="60" y="474" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Must wait for next supervisor notify.</text>
+
+  <text x="60" y="520" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#8a6d00">Stays in KabQue line  fair reorder</text>
+
+  <!-- Right column -->
+  <rect x="500" y="100" width="420" height="460" rx="8" fill="#fde8e8" stroke="#b42318" stroke-width="2"/>
+  <text x="710" y="140" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#0b2a4a">Leave queue</text>
+  <text x="710" y="165" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">API: POST /student/leave-queue/</text>
+
+  <text x="520" y="210" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">When</text>
+  <text x="520" y="232" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Student wants out completely</text>
+  <text x="520" y="250" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">(any status except final approved/rejected).</text>
+
+  <text x="520" y="290" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">What happens</text>
+  <text x="520" y="312" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Queue entry deleted</text>
+  <text x="520" y="332" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" Notification links cleared</text>
+  <text x="520" y="352" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" joined_queue_at cleared</text>
+  <text x="520" y="372" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">" No longer in queue</text>
+
+  <text x="520" y="412" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">To come back</text>
+  <text x="520" y="434" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Must Join queue again on campus</text>
+  <text x="520" y="454" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">(GPS)  new waiting place.</text>
+
+  <text x="520" y="520" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#b42318">Leaves KabQue line entirely</text>
+
+  <text x="40" y="600" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/04-return-vs-leave.svg</text>
+</svg>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="760" viewBox="0 0 1000 760">
+  <rect width="1000" height="760" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 6  Verify &amp; Complete</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Desk: secret code ’ check-in ’ approve / reject / no-show</text>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#334455"/>
+    </marker>
+  </defs>
+
+  <rect x="320" y="95" width="360" height="50" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="500" y="125" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Fresher shows secret code</text>
+  <line x1="500" y1="145" x2="500" y2="185" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="280" y="185" width="440" height="56" rx="6" fill="#fff8db" stroke="#c9a000"/>
+  <text x="500" y="210" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Supervisor: Confirm identity</text>
+  <text x="500" y="230" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">POST /admin/verify-code/</text>
+  <line x1="500" y1="241" x2="500" y2="280" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="300" y="280" width="400" height="56" rx="6" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="500" y="305" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Checked in · profile shown</text>
+  <text x="500" y="324" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Day check · queue # · faculty · contacts</text>
+  <line x1="500" y1="336" x2="500" y2="380" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="340" y="380" width="320" height="40" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="500" y="405" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b2a4a">Desk decision</text>
+
+  <line x1="340" y1="400" x2="140" y2="470" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="500" y1="420" x2="500" y2="470" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="660" y1="400" x2="860" y2="470" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="40" y="470" width="200" height="100" rx="6" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="140" y="505" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Approve</text>
+  <text x="140" y="528" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Leave live queue</text>
+  <text x="140" y="546" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Leave batch table</text>
+
+  <rect x="400" y="470" width="200" height="100" rx="6" fill="#fde8e8" stroke="#b42318" stroke-width="2"/>
+  <text x="500" y="505" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">Reject</text>
+  <text x="500" y="528" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Leave live queue</text>
+  <text x="500" y="546" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Leave batch table</text>
+
+  <rect x="760" y="470" width="200" height="100" rx="6" fill="#fff4e5" stroke="#d97706" stroke-width="2"/>
+  <text x="860" y="505" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">No-show</text>
+  <text x="860" y="528" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Stay in batch</text>
+  <text x="860" y="546" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">End-of-day reschedule</text>
+
+  <rect x="80" y="610" width="840" height="80" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="100" y="645" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">Approve/Reject: lifetime counts bump · batch positions recompact · student gone from desk lists.</text>
+  <text x="100" y="668" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#334455">No-show: status=skipped · can verify again later with same code ’ check-in again.</text>
+
+  <text x="40" y="735" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/06-verify-complete-flow.svg</text>
+</svg>

@@ -231,3 +231,5 @@ export function getCurrentPosition() {
     );
   });
 }
+
+// Prefer captureCampusLocation from geo/campusLocation.js for join-queue.

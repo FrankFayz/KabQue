@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="580" viewBox="0 0 1000 580">
+  <rect width="1000" height="580" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 6  Verify code checks</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">What happens when the supervisor enters a code</text>
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#334455"/>
+    </marker>
+  </defs>
+
+  <rect x="350" y="100" width="300" height="45" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="500" y="128" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b2a4a">Lookup secret code</text>
+  <line x1="500" y1="145" x2="500" y2="180" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="300" y="180" width="400" height="40" rx="6" fill="#fff8db" stroke="#c9a000"/>
+  <text x="500" y="205" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#0b2a4a">Does a fresher match?</text>
+
+  <line x1="300" y1="200" x2="120" y2="270" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="700" y1="200" x2="880" y2="270" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="40" y="270" width="160" height="70" rx="6" fill="#fde8e8" stroke="#b42318"/>
+  <text x="120" y="300" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0b2a4a">No match</text>
+  <text x="120" y="320" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#556677">404 Invalid code</text>
+
+  <rect x="800" y="270" width="160" height="70" rx="6" fill="#e8f6ee" stroke="#1a7a4c"/>
+  <text x="880" y="300" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0b2a4a">Match found</text>
+  <text x="880" y="320" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#556677">Check status</text>
+
+  <line x1="880" y1="340" x2="500" y2="390" stroke="#334455" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="200" y="390" width="600" height="120" rx="8" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="220" y="420" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">Status gates</text>
+  <text x="220" y="445" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#334455">waiting ’ reject (notify first)</text>
+  <text x="220" y="465" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#334455">approved / rejected ’ reject (already used)</text>
+  <text x="220" y="485" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#334455">notified / skipped ’ check in · already checked_in ’ confirm only</text>
+
+  <text x="40" y="550" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/06-verify-code-checks.svg</text>
+</svg>

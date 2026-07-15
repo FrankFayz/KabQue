@@ -215,10 +215,26 @@ def _mysmsgate_hint(status_code: int, detail: str) -> str:
     return "SMS send failed"
 
 
+def _mysmsgate_accepted(status_code: int, parsed: dict | None) -> bool:
+    """HTTP 200/202 with success != false (MySMSGate queues as pending)."""
+    if status_code not in (200, 201, 202):
+        return False
+    if not isinstance(parsed, dict):
+        return True
+    if parsed.get("success") is False:
+        return False
+    if str(parsed.get("status", "")).lower() in ("failed", "error"):
+        return False
+    return True
+
+
 def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
     if not api_key:
-        return False, "MySMSGate API key missing on server"
+        return False, (
+            "MySMSGate API key missing on server — set MYSMSGATE_API_KEY "
+            "(e.g. on Render Environment)"
+        )
 
     if not to_phone.startswith("+"):
         return False, f"Phone must start with country code (+…), got: {to_phone}"
@@ -237,7 +253,7 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     attempts = []
     if device_id:
         attempts.append({"device_id": device_id})
-    # Always try without a pinned device (uses first online device on the account)
+    # Fallback: first online device on the account
     attempts.append({})
 
     last_error = "SMS send failed"
@@ -246,7 +262,9 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         if sim_slot is not None and str(sim_slot).strip() != "":
             try:
                 slot = int(sim_slot)
+                # Docs use both names across versions
                 payload["slot"] = slot
+                payload["sim_slot"] = slot
             except (TypeError, ValueError):
                 pass
 
@@ -264,21 +282,25 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
-                logger.info(
-                    "MySMSGate accepted SMS to %s (HTTP %s)", to_phone, resp.status
-                )
+                parsed = None
                 if raw:
                     try:
                         parsed = json.loads(raw)
-                        if parsed.get("success") is False:
-                            last_error = _mysmsgate_hint(
-                                resp.status,
-                                _parse_mysmsgate_error(raw),
-                            )
-                            continue
                     except json.JSONDecodeError:
-                        pass
-            return True, ""
+                        parsed = None
+                if _mysmsgate_accepted(resp.status, parsed):
+                    logger.info(
+                        "MySMSGate accepted SMS to %s (HTTP %s, status=%s)",
+                        to_phone,
+                        resp.status,
+                        (parsed or {}).get("status", "ok"),
+                    )
+                    return True, ""
+                last_error = _mysmsgate_hint(
+                    resp.status,
+                    _parse_mysmsgate_error(raw or ""),
+                )
+                continue
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             parsed_detail = _parse_mysmsgate_error(detail, detail)

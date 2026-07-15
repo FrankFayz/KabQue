@@ -29,8 +29,8 @@ export default function HomeHowItWorks() {
           <p className="home-kicker">Process</p>
           <h2 id="how-heading">How KabQue works</h2>
           <p className="home-lede">
-            A clear path from signup to document approval — fair, ordered, and built for Kabale
-            University freshers.
+            Four clear steps from signup to desk verification — built for Kabale
+            University freshers at Kikungiri Campus.
           </p>
         </header>
 

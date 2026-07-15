@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="680" viewBox="0 0 1000 680">
+  <rect width="1000" height="680" fill="#ffffff"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b2a4a">KabQue · Module 8  Queue Table</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#556677">Browse all live queue entries · filter · search · single reschedule</text>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#334455"/>
+    </marker>
+  </defs>
+
+  <rect x="300" y="100" width="400" height="50" rx="6" fill="#e8f1fb" stroke="#0b5cab" stroke-width="2"/>
+  <text x="500" y="130" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">GET /admin/queue/</text>
+  <line x1="500" y1="150" x2="500" y2="190" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="190" width="480" height="70" rx="6" fill="#fff8db" stroke="#c9a000"/>
+  <text x="500" y="220" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#0b2a4a">Queue browser (10 per page)</text>
+  <text x="500" y="242" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Ordered by arrival time (created_at)</text>
+
+  <line x1="260" y1="225" x2="140" y2="310" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="500" y1="260" x2="500" y2="310" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="740" y1="225" x2="860" y2="310" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="40" y="310" width="200" height="80" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="140" y="345" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">Filter status</text>
+  <text x="140" y="368" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#556677">waiting · notified · &</text>
+
+  <rect x="400" y="310" width="200" height="80" rx="6" fill="#f8fafc" stroke="#ccd5dd"/>
+  <text x="500" y="345" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">Search reg no.</text>
+  <text x="500" y="368" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#556677">Primary student key</text>
+
+  <rect x="760" y="310" width="200" height="80" rx="6" fill="#fff4e5" stroke="#d97706"/>
+  <text x="860" y="345" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#0b2a4a">Single reschedule</text>
+  <text x="860" y="368" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#556677">Per-row date + button</text>
+
+  <line x1="860" y1="390" x2="500" y2="450" stroke="#334455" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="220" y="450" width="560" height="120" rx="8" fill="#e8f6ee" stroke="#1a7a4c" stroke-width="2"/>
+  <text x="500" y="485" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#0b2a4a">POST /admin/reschedule/</text>
+  <text x="500" y="510" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Detach from batch table · new day · new secret code · notify</text>
+  <text x="500" y="535" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#556677">Not the same as batch reschedule (no new batch table row set)</text>
+
+  <text x="40" y="640" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#8899aa">File: docs/diagrams/08-queue-table-flow.svg</text>
+</svg>

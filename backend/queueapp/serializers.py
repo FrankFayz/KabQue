@@ -8,12 +8,14 @@ from .auth_utils import (
     is_kab_university_email,
     kab_email_error_message,
     normalize_email,
+    parse_main_admin_identifier,
     phone_already_registered,
     username_is_main_admin,
 )
-from .geo import is_on_campus
+from .geo import validate_join_gps
 from .models import CampusSettings, NotificationBatch, QueueEntry, StudentProfile
 from .phones import validate_east_africa_phone
+from .registration import validate_kabale_registration_number
 
 User = get_user_model()
 
@@ -25,9 +27,10 @@ class StudentRegisterSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=6)
 
     def validate_registration_number(self, value):
-        reg = value.strip().upper()
-        if not reg:
-            raise serializers.ValidationError("Registration number is required.")
+        try:
+            reg = validate_kabale_registration_number(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
         if username_is_main_admin(reg) or username_is_main_admin(reg.lower()):
             raise serializers.ValidationError("Unable to create account.")
         if StudentProfile.objects.filter(registration_number__iexact=reg).exists():
@@ -51,6 +54,7 @@ class StudentRegisterSerializer(serializers.Serializer):
             password=validated_data["password"],
             role=User.Role.STUDENT,
             is_approved=True,
+            email_verified=True,
         )
         profile = StudentProfile.objects.create(
             user=user,
@@ -63,29 +67,40 @@ class StudentRegisterSerializer(serializers.Serializer):
 
 
 class MainAdminRegisterSerializer(serializers.Serializer):
-    """Main Admin: username must contain #@admin@#."""
+    """Main Admin: must be local@kab.ac.ug#@admin@# (marker after Kabale email)."""
 
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True, min_length=6)
 
     def validate_username(self, value):
-        username = (value or "").strip()
-        if not username_is_main_admin(username):
-            raise serializers.ValidationError("Unable to create account.")
+        parsed = parse_main_admin_identifier(value)
+        if not parsed:
+            raise serializers.ValidationError(
+                "Main Admin account must be your Kabale email followed by #@admin@# "
+                "(example: name@kab.ac.ug#@admin@#)."
+            )
+        username, contact_email = parsed
         if User.objects.filter(username__iexact=username).exists():
-            raise serializers.ValidationError("This username is already registered.")
+            raise serializers.ValidationError("This Main Admin account is already registered.")
+        if email_already_registered(contact_email):
+            raise serializers.ValidationError(
+                "That Kabale email is already used by another KabQue account."
+            )
         return username
 
     @transaction.atomic
     def create(self, validated_data):
         username = validated_data["username"]
+        parsed = parse_main_admin_identifier(username)
+        contact_email = parsed[1] if parsed else ""
         user = User.objects.create_user(
             username=username,
-            email="",
+            email=contact_email,
             password=validated_data["password"],
             role=User.Role.MAIN_ADMIN,
             is_staff=False,
             is_approved=True,
+            email_verified=False,
         )
         return {"user": user}
 
@@ -132,6 +147,7 @@ class LecturerRegisterSerializer(serializers.Serializer):
             role=User.Role.ADMIN,
             is_staff=True,
             is_approved=False,
+            email_verified=False,
         )
         return {"user": user}
 
@@ -146,37 +162,41 @@ class CompleteStudentProfileSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=150)
     faculty = serializers.CharField(max_length=150)
     programme = serializers.CharField(max_length=150)
-    email = serializers.EmailField(required=False, allow_blank=True)
-    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    email = serializers.EmailField()
+    phone = serializers.CharField(max_length=20)
 
     def validate(self, attrs):
         email = normalize_email(attrs.get("email") or "")
         phone_raw = (attrs.get("phone") or "").strip()
-        if not email and not phone_raw:
-            raise serializers.ValidationError(
-                "Provide at least an email or a telephone number for notifications."
+
+        attrs["full_name"] = (attrs.get("full_name") or "").strip()
+        attrs["faculty"] = (attrs.get("faculty") or "").strip()
+        attrs["programme"] = (attrs.get("programme") or "").strip()
+
+        errors = {}
+        if not attrs["full_name"]:
+            errors["full_name"] = "Full name is required."
+        if not attrs["faculty"]:
+            errors["faculty"] = "Faculty is required."
+        if not attrs["programme"]:
+            errors["programme"] = "Programme is required."
+        if not email:
+            errors["email"] = (
+                "Email is required for notifications and password resets."
             )
+        if not phone_raw:
+            errors["phone"] = "Telephone number is required for SMS notifications."
 
         try:
-            phone = validate_east_africa_phone(phone_raw)
+            phone = validate_east_africa_phone(phone_raw) if phone_raw else ""
         except ValueError as exc:
-            raise serializers.ValidationError({"phone": str(exc)}) from exc
+            errors["phone"] = str(exc)
+            phone = ""
 
-        attrs["full_name"] = attrs["full_name"].strip()
-        attrs["faculty"] = attrs["faculty"].strip()
-        attrs["programme"] = attrs["programme"].strip()
         attrs["email"] = email
         attrs["phone"] = phone
 
-        if not attrs["full_name"]:
-            raise serializers.ValidationError({"full_name": "Full name is required."})
-        if not attrs["faculty"]:
-            raise serializers.ValidationError({"faculty": "Faculty is required."})
-        if not attrs["programme"]:
-            raise serializers.ValidationError({"programme": "Programme is required."})
-
         user = self.context["request"].user
-        errors = {}
         if email and email_already_registered(email, exclude_user_id=user.pk):
             errors["email"] = (
                 "This email already belongs to another account. Use a different email."
@@ -240,21 +260,34 @@ class CompleteStudentProfileSerializer(serializers.Serializer):
 class JoinQueueSerializer(serializers.Serializer):
     latitude = serializers.FloatField()
     longitude = serializers.FloatField()
+    accuracy = serializers.FloatField(required=False, allow_null=True)
+    altitude = serializers.FloatField(required=False, allow_null=True)
+    altitude_accuracy = serializers.FloatField(required=False, allow_null=True)
+    speed = serializers.FloatField(required=False, allow_null=True)
+    heading = serializers.FloatField(required=False, allow_null=True)
+    captured_at = serializers.FloatField(required=False, allow_null=True)
+    sample_count = serializers.IntegerField(required=False, allow_null=True)
+    sample_spread_m = serializers.FloatField(required=False, allow_null=True)
+    samples = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        allow_empty=True,
+        max_length=6,
+    )
 
     def validate(self, attrs):
-        allowed, distance, radius = is_on_campus(attrs["latitude"], attrs["longitude"])
-        if not allowed:
-            raise serializers.ValidationError(
-                {
-                    "location": (
-                        "You must be inside Uganda to join the KabQue test queue. "
-                        "Turn on GPS and try again. "
-                        f"(You are about {int(distance)}m outside the allowed area; "
-                        f"allowed radius: {int(radius)}m.)"
-                    )
-                }
+        try:
+            distance, _radius, accuracy = validate_join_gps(
+                attrs["latitude"],
+                attrs["longitude"],
+                accuracy=attrs.get("accuracy"),
+                samples=attrs.get("samples") or [],
             )
+        except ValueError as exc:
+            raise serializers.ValidationError({"location": str(exc)}) from exc
+
         attrs["_distance_meters"] = distance
+        attrs["_accuracy_meters"] = accuracy
         return attrs
 
 
@@ -449,6 +482,35 @@ class MainAdminUserSerializer(serializers.Serializer):
     verification_status = serializers.CharField(required=False, allow_blank=True)
     queue_position = serializers.IntegerField(required=False, allow_null=True)
     scheduled_date = serializers.DateField(required=False, allow_null=True)
+
+
+class VerifySupervisorEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=8)
+
+    def validate_email(self, value):
+        return normalize_email(value)
+
+
+class ResendSupervisorEmailCodeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return normalize_email(value)
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    identifier = serializers.CharField(max_length=150)
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    identifier = serializers.CharField(max_length=150)
+    code = serializers.CharField(max_length=8)
+    new_password = serializers.CharField(write_only=True, min_length=6)
+
+
+class ResendPasswordResetSerializer(serializers.Serializer):
+    identifier = serializers.CharField(max_length=150)
 
 
 class ApproveSupervisorSerializer(serializers.Serializer):

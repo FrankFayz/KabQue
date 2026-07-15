@@ -3,23 +3,50 @@ export default function AdminStats({ counts = {} }) {
   const leftovers = counts.batch_leftovers ?? 0;
   const pool = counts.notify_pool ?? waiting + leftovers;
   const items = [
-    ['Total', counts.total, 'In queue'],
-    ['To schedule', pool, leftovers > 0 ? `${waiting} waiting · ${leftovers} in batch` : 'Waiting + batch leftovers'],
-    ['Notified', counts.notified, 'Assigned a day'],
-    ['Checked in', counts.checked_in, 'At the desk'],
-    ['Approved', counts.approved, 'Left batch table'],
+    {
+      label: 'Total',
+      value: counts.total,
+      hint: 'Everyone still on the desk list',
+      tone: '',
+    },
+    {
+      label: 'To schedule',
+      value: pool,
+      hint:
+        leftovers > 0
+          ? `${waiting} waiting · ${leftovers} still in a batch`
+          : waiting > 0
+            ? 'New joiners waiting for a notify day'
+            : 'No one waiting to notify',
+      tone: pool > 0 ? 'stat-remaining is-hot' : 'stat-remaining',
+    },
+    {
+      label: 'Notified',
+      value: counts.notified,
+      hint: 'Has a day + queue number',
+      tone: '',
+    },
+    {
+      label: 'Checked in',
+      value: counts.checked_in,
+      hint: 'Code verified at desk',
+      tone: '',
+    },
+    {
+      label: 'Approved',
+      value: counts.approved,
+      hint: 'Cleared · left live tables',
+      tone: '',
+    },
   ];
 
   return (
-    <div className="stat-row">
-      {items.map(([label, value, hint]) => (
-        <div
-          key={label}
-          className={`stat${label === 'To schedule' ? ' stat-remaining' : ''}`}
-        >
-          <span className="label">{label}</span>
-          <strong>{value ?? 0}</strong>
-          <span className="stat-hint">{hint}</span>
+    <div className="stat-row desk-stat-row">
+      {items.map((item) => (
+        <div key={item.label} className={`stat ${item.tone}`.trim()}>
+          <span className="label">{item.label}</span>
+          <strong>{item.value ?? 0}</strong>
+          <span className="stat-hint">{item.hint}</span>
         </div>
       ))}
     </div>

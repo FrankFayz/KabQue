@@ -6,7 +6,6 @@ import CompleteProfileCard from '../components/student/CompleteProfileCard';
 import JoinQueueCard from '../components/student/JoinQueueCard';
 import QueueStatusBoard from '../components/student/QueueStatusBoard';
 import Alert from '../components/ui/Alert';
-import PageHeader from '../components/ui/PageHeader';
 
 /** Same join-queue screen students use — shown when Main Admin opens Students. */
 function MainAdminStudentJoinView() {
@@ -21,16 +20,21 @@ function MainAdminStudentJoinView() {
   };
 
   return (
-    <section className="dash">
-      <PageHeader
-        eyebrow="Student dashboard"
-        title="Join the queue"
-        action={
+    <section className="dash student-dash">
+      <header className="student-welcome">
+        <div className="student-welcome-copy">
+          <p className="student-welcome-kicker">Student dashboard</p>
+          <h1>Join the queue</h1>
+          <p className="student-welcome-lede">
+            Preview of the fresher join screen used at Kikungiri Campus.
+          </p>
+        </div>
+        <div className="student-welcome-actions">
           <Link to="/main-admin" className="btn btn-secondary">
             Back to Main Admin
           </Link>
-        }
-      />
+        </div>
+      </header>
       <JoinQueueCard profile={previewProfile} />
     </section>
   );
@@ -174,55 +178,74 @@ function StudentDashboardLive() {
     }
   }
 
-  const greeting =
+  const displayName =
     user?.full_name ||
     profile?.full_name ||
+    '';
+  const reg =
     profile?.registration_number ||
     user?.registration_number ||
-    'student';
+    '';
+  const stage = !profileComplete
+    ? 'Complete your profile'
+    : inQueue
+      ? 'Your queue status'
+      : 'Ready to join on campus';
 
   return (
-    <section className="dash">
-      <PageHeader
-        eyebrow="Student dashboard"
-        title={`Hello, ${greeting}`}
-        action={
-          <div className="dash-actions">
-            {lastRefreshed && (
-              <span className="dash-refreshed">
-                Updated {lastRefreshed.toLocaleTimeString()}
-              </span>
-            )}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => load({ manual: true })}
-              disabled={refreshing}
-            >
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
-        }
-      />
+    <section className="dash student-dash">
+      <header className="student-welcome">
+        <div className="student-welcome-copy">
+          <p className="student-welcome-kicker">KabQue · Fresher queue</p>
+          <h1>{displayName ? `Hello, ${displayName}` : 'Student dashboard'}</h1>
+          <p className="student-welcome-lede">
+            {stage}
+            {reg ? (
+              <>
+                {' · '}
+                <span className="student-welcome-reg">{reg}</span>
+              </>
+            ) : null}
+          </p>
+        </div>
+        <div className="student-welcome-actions">
+          {lastRefreshed ? (
+            <span className="dash-refreshed">
+              Updated {lastRefreshed.toLocaleTimeString()}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => load({ manual: true })}
+            disabled={refreshing}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      </header>
+
       <Alert>{error}</Alert>
       <Alert variant="info">{!error ? info : ''}</Alert>
 
-      {inQueue ? (
-        <QueueStatusBoard
-          queue={queue}
-          busy={actionBusy}
-          onReschedule={handleReschedule}
-          onLeave={handleLeaveQueue}
-        />
-      ) : !profileComplete ? (
-        <CompleteProfileCard profile={profile} onSaved={handleProfileSaved} />
-      ) : (
-        <JoinQueueCard
-          profile={profile}
-          onJoined={handleJoined}
-          onProfileUpdated={handleProfileSaved}
-        />
-      )}
+      <div className="student-dash-body">
+        {inQueue ? (
+          <QueueStatusBoard
+            queue={queue}
+            busy={actionBusy}
+            onReschedule={handleReschedule}
+            onLeave={handleLeaveQueue}
+          />
+        ) : !profileComplete ? (
+          <CompleteProfileCard profile={profile} onSaved={handleProfileSaved} />
+        ) : (
+          <JoinQueueCard
+            profile={profile}
+            onJoined={handleJoined}
+            onProfileUpdated={handleProfileSaved}
+          />
+        )}
+      </div>
     </section>
   );
 }
