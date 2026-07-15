@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api } from '../api';
 import Alert from '../components/ui/Alert';
 import PageHeader from '../components/ui/PageHeader';
@@ -28,6 +27,15 @@ function statusLabel(status) {
 
 function AccountActions({ row, busy, onLock, onDelete, extra }) {
   const locked = Boolean(row.is_locked);
+  if (row.is_self) {
+    return (
+      <div className="main-admin-actions">
+        <span className="main-admin-you" title="This is your signed-in account">
+          You
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="main-admin-actions">
       {extra}
@@ -67,21 +75,17 @@ export default function MainAdminDashboard() {
   const [lastSynced, setLastSynced] = useState(null);
   const [refreshNote, setRefreshNote] = useState('');
   const loadSeq = useRef(0);
+  const hasLoadedOnce = useRef(false);
 
   useEffect(() => {
     const id = setTimeout(() => setSearchApplied(search.trim()), 320);
     return () => clearTimeout(id);
   }, [search]);
 
-  const loadOverview = useCallback(async () => {
-    const data = await api(`/main-admin/overview/?_=${Date.now()}`);
-    setTotals(data.totals || null);
-  }, []);
-
   const loadTab = useCallback(
     async ({ manual = false } = {}) => {
       const seq = ++loadSeq.current;
-      setBusy(true);
+      if (manual || !hasLoadedOnce.current) setBusy(true);
       setError('');
       if (manual) setRefreshNote('');
       try {
@@ -90,13 +94,18 @@ export default function MainAdminDashboard() {
         if (tab === 'supervisors') path = '/main-admin/supervisors/';
         const params = new URLSearchParams();
         if (tab === 'freshers' && searchApplied) params.set('search', searchApplied);
-        params.set('_', String(Date.now()));
-        const data = await api(`${path}?${params.toString()}`);
+        const stamp = String(Date.now());
+        params.set('_', stamp);
+
+        const [data, overview] = await Promise.all([
+          api(`${path}?${params.toString()}`),
+          api(`/main-admin/overview/?_=${stamp}`).catch(() => null),
+        ]);
         if (seq !== loadSeq.current) return;
         setRows(Array.isArray(data.results) ? data.results : []);
         setTotal(data.total ?? 0);
-        await loadOverview();
-        if (seq !== loadSeq.current) return;
+        if (overview?.totals) setTotals(overview.totals);
+        hasLoadedOnce.current = true;
         setLastSynced(new Date());
         if (manual) {
           setRefreshNote(
@@ -113,7 +122,7 @@ export default function MainAdminDashboard() {
         if (seq === loadSeq.current) setBusy(false);
       }
     },
-    [tab, searchApplied, loadOverview]
+    [tab, searchApplied]
   );
 
   useEffect(() => {
@@ -139,11 +148,18 @@ export default function MainAdminDashboard() {
   }
 
   async function lockUser(row, lock) {
+    if (row.is_self) {
+      setError('You cannot lock your own account. Ask another Main Admin.');
+      return;
+    }
     const label =
       row.registration_number || row.email || row.username || `user #${row.id}`;
+    const isAdmin = Boolean(row.is_main_admin) || tab === 'admins';
     const ok = window.confirm(
       lock
-        ? `Lock account for ${label}?\n\nThey will not be able to sign in until unlocked.`
+        ? isAdmin
+          ? `Lock Main Admin ${label}?\n\nThey will not be able to sign in until unlocked. At least one other Main Admin must remain able to sign in.`
+          : `Lock account for ${label}?\n\nThey will not be able to sign in until unlocked.`
         : `Unlock account for ${label}?\n\nThey will be able to sign in again.`
     );
     if (!ok) return;
@@ -166,12 +182,24 @@ export default function MainAdminDashboard() {
   }
 
   async function deleteUser(row) {
+    if (row.is_self) {
+      setError('You cannot delete your own account. Ask another Main Admin.');
+      return;
+    }
     const label =
       row.registration_number || row.email || row.username || `user #${row.id}`;
-    const kind = tab === 'freshers' ? 'student' : 'supervisor';
+    const kind =
+      tab === 'freshers'
+        ? 'student'
+        : tab === 'admins' || row.is_main_admin
+          ? 'Main Admin'
+          : 'supervisor';
     const ok = window.confirm(
-      `Permanently delete ${kind} ${label}?\n\n` +
-        'This removes the account and related queue data from the database. This cannot be undone.'
+      kind === 'Main Admin'
+        ? `Permanently delete Main Admin ${label}?\n\n` +
+            'Their account is removed from KabQue. Notification batches they created stay in the system (creator cleared). You cannot delete the last Main Admin or your own account.'
+        : `Permanently delete ${kind} ${label}?\n\n` +
+            'This removes the account and related queue data from the database. This cannot be undone.'
     );
     if (!ok) return;
 
@@ -194,7 +222,7 @@ export default function MainAdminDashboard() {
       const counts = data.counts || {};
       const countHint =
         kind === 'student' && counts.total != null
-          ? ` Desk now: Total ${counts.total ?? 0}, To schedule ${counts.notify_pool ?? counts.remaining ?? 0}, Notified ${counts.notified ?? 0}, Checked in ${counts.checked_in ?? 0}, Approved ${counts.approved ?? 0}.`
+          ? ` Desk now: In queue ${counts.total ?? 0}, Notified ${counts.notified ?? 0}, Approved (all-time) ${counts.approved ?? 0}.`
           : '';
       setMessage((data.message || 'Account permanently deleted.') + countHint);
       await loadTab({ manual: false });
@@ -213,20 +241,15 @@ export default function MainAdminDashboard() {
         : totals?.supervisors ?? total;
 
   const colSpan =
-    tab === 'freshers' ? 7 : tab === 'admins' ? 5 : 5;
+    tab === 'freshers' ? 7 : tab === 'admins' ? 6 : 5;
 
   return (
     <div className="panel-page main-admin-page">
       <PageHeader
-        eyebrow="System control"
+        eyebrow="Kabale University"
         title="Main Admin"
         action={
           <div className="dash-actions">
-            <nav className="main-admin-monitor-nav" aria-label="Monitor pages">
-              <Link to="/admin" className="btn btn-secondary">
-                Supervisors
-              </Link>
-            </nav>
             {lastSynced ? (
               <span className="dash-refreshed">
                 {busy ? 'Refreshing…' : `Updated · ${lastSynced.toLocaleTimeString()}`}
@@ -244,11 +267,6 @@ export default function MainAdminDashboard() {
           </div>
         }
       />
-
-      <p className="main-admin-lead">
-        Control all KabQue accounts. Approve Kabale staff, lock access, or permanently
-        delete students and supervisors from the system.
-      </p>
 
       <Alert>{error}</Alert>
       {message || refreshNote ? (
@@ -349,6 +367,7 @@ export default function MainAdminDashboard() {
                   <th>Role</th>
                   <th>Access</th>
                   <th>Joined</th>
+                  <th>Actions</th>
                 </tr>
               ) : (
                 <tr>
@@ -406,9 +425,15 @@ export default function MainAdminDashboard() {
                 ))}
               {tab === 'admins' &&
                 rows.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className={row.is_locked ? 'row-locked' : undefined}
+                  >
                     <td>
                       <code className="main-admin-username">{row.username}</code>
+                      {row.is_self ? (
+                        <span className="main-admin-you-inline"> · you</span>
+                      ) : null}
                     </td>
                     <td>{row.full_name || '—'}</td>
                     <td>Main Admin</td>
@@ -421,6 +446,14 @@ export default function MainAdminDashboard() {
                       {row.date_joined
                         ? new Date(row.date_joined).toLocaleDateString()
                         : '—'}
+                    </td>
+                    <td>
+                      <AccountActions
+                        row={row}
+                        busy={actionBusy === row.id}
+                        onLock={lockUser}
+                        onDelete={deleteUser}
+                      />
                     </td>
                   </tr>
                 ))}

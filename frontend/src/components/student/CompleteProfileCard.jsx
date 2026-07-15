@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { api, setAuth } from '../../api';
-import { isValidE164 } from '../../constants/eastAfricaPhones';
+import { api, setAuth, userError } from '../../api';
+import { validateEastAfricaPhone } from '../../constants/eastAfricaPhones';
 import FacultyProgrammeFields from '../auth/FacultyProgrammeFields';
 import Alert from '../ui/Alert';
 import PhoneInput from '../ui/PhoneInput';
@@ -90,9 +90,9 @@ export default function CompleteProfileCard({ profile, onSaved }) {
       return;
     }
     const email = form.email.trim();
-    const phone = form.phone.trim();
-    if (!isValidE164(phone)) {
-      setError('Use a valid East African mobile number with country code (e.g. Uganda +256…).');
+    const phoneCheck = validateEastAfricaPhone(form.phone.trim());
+    if (!phoneCheck.ok) {
+      setError(phoneCheck.error);
       return;
     }
     setLoading(true);
@@ -104,13 +104,13 @@ export default function CompleteProfileCard({ profile, onSaved }) {
           faculty: form.faculty,
           programme: form.programme,
           email,
-          phone,
+          phone: phoneCheck.value,
         },
       });
       if (data.user) setAuth({ user: data.user });
       onSaved?.(data);
     } catch (err) {
-      setError(err.message || 'Could not save your profile. Please try again.');
+      setError(userError(err, 'Could not save your profile. Please check every field and try again.'));
     } finally {
       setLoading(false);
     }

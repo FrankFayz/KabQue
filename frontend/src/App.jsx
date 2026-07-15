@@ -1,6 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { getStoredUser } from './api';
-import { homePathFor, isMainAdmin } from './authRoles';
+import {
+  homePathFor,
+  isMainAdmin,
+  isStudent,
+  isSupervisor,
+} from './authRoles';
 import AuthShell from './components/auth/AuthShell';
 import Layout from './components/layout/Layout';
 import Home from './pages/Home';
@@ -11,6 +16,13 @@ import AdminDashboard from './pages/AdminDashboard';
 import MainAdminDashboard from './pages/MainAdminDashboard';
 import './App.css';
 
+/**
+ * Strict role gates:
+ * - student      → /student only
+ * - supervisor   → /admin only
+ * - main_admin   → /main-admin only
+ * Cross-role URLs bounce to that user's home.
+ */
 function Protected({ children, role }) {
   const user = getStoredUser();
   if (!user) return <Navigate to="/login" replace />;
@@ -23,25 +35,20 @@ function Protected({ children, role }) {
   }
 
   if (role === 'admin') {
-    if (isMainAdmin(user)) return children;
-    if (user.role !== 'admin' && !user.is_staff) {
-      return <Navigate to="/student" replace />;
-    }
-    if (user.is_approved === false) {
-      return <Navigate to="/login" replace />;
+    if (!isSupervisor(user)) {
+      return <Navigate to={homePathFor(user)} replace />;
     }
     return children;
   }
 
   if (role === 'student') {
-    if (isMainAdmin(user)) return children;
-    if (user.role === 'admin' || user.role === 'main_admin') {
-      return <Navigate to="/admin" replace />;
+    if (!isStudent(user)) {
+      return <Navigate to={homePathFor(user)} replace />;
     }
     return children;
   }
 
-  return children;
+  return <Navigate to={homePathFor(user)} replace />;
 }
 
 export default function App() {

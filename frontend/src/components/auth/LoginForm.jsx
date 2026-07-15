@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, setAuth } from '../../api';
+import { api, clearAuth, setAuth } from '../../api';
 import { homePathFor } from '../../authRoles';
 import { normalizeRegistrationNumber } from '../../constants/registrationNumber';
 import Alert from '../ui/Alert';
@@ -46,6 +46,8 @@ export default function LoginForm() {
     setInfo('');
     setLoading(true);
     try {
+      // Drop any expired tokens first so a background 401/refresh cannot wipe a fresh login.
+      clearAuth();
       const submitId = normalizeSignInIdentifier(identifier);
       const data = await api('/auth/login/', {
         method: 'POST',
@@ -66,7 +68,6 @@ export default function LoginForm() {
         setVerifyEmail(err.data.email || identifier.trim());
         setVerifyMessage(
           err.message ||
-            err.data.detail ||
             'Please verify your email with the code we sent you.'
         );
         setVerifyVariant(
@@ -79,7 +80,6 @@ export default function LoginForm() {
       if (err?.data?.pending_approval) {
         setInfo(
           err.message ||
-            err.data.detail ||
             'Your email is verified. Wait for approval before signing in.'
         );
         return;

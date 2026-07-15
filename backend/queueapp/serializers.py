@@ -307,6 +307,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             "phone",
             "registered_at",
             "profile_complete",
+            "desk_outcome",
         )
 
     def get_profile_complete(self, obj):
@@ -401,7 +402,9 @@ class VerifyCodeSerializer(serializers.Serializer):
 
 class CompleteVerificationSerializer(serializers.Serializer):
     queue_entry_id = serializers.IntegerField()
-    decision = serializers.ChoiceField(choices=["approved", "rejected", "skipped"])
+    decision = serializers.ChoiceField(
+        choices=["approved", "rejected", "back_to_queue"]
+    )
     notes = serializers.CharField(required=False, allow_blank=True)
 
 

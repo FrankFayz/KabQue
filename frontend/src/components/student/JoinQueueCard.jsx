@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, friendlyUserMessage, setAuth } from '../../api';
-import { isValidE164 } from '../../constants/eastAfricaPhones';
+import { api, friendlyUserMessage, setAuth, userError } from '../../api';
+import { validateEastAfricaPhone } from '../../constants/eastAfricaPhones';
 import { captureCampusLocation } from '../../geo/campusLocation';
 import Alert from '../ui/Alert';
 import GpsPinIcon from '../ui/GpsPinIcon';
@@ -50,7 +50,13 @@ function statusCopy(phase) {
   };
 }
 
-export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
+export default function JoinQueueCard({
+  profile,
+  onJoined,
+  onProfileUpdated,
+  joinDisabled = false,
+  showRejoinHint = false,
+}) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [phase, setPhase] = useState('idle'); // idle | locating | sampling | confirming
@@ -70,10 +76,9 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
     setError('');
     const nextPhone = phone.trim();
     const nextEmail = email.trim();
-    if (nextPhone && !isValidE164(nextPhone)) {
-      setError(
-        'Enter a valid East African mobile number with country code (e.g. Uganda +256…).'
-      );
+    const phoneCheck = validateEastAfricaPhone(nextPhone);
+    if (nextPhone && !phoneCheck.ok) {
+      setError(phoneCheck.error);
       return;
     }
     if (!nextEmail && !nextPhone) {
@@ -89,7 +94,7 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
           faculty: profile?.faculty || '',
           programme: profile?.programme || '',
           email: nextEmail,
-          phone: nextPhone,
+          phone: phoneCheck.ok ? phoneCheck.value : nextPhone,
         },
       });
       if (data.user) setAuth({ user: data.user });
@@ -106,7 +111,7 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
   }
 
   async function joinQueue() {
-    if (loading) return;
+    if (loading || joinDisabled) return;
     setError('');
     setInfo('');
     setLoading(true);
@@ -152,8 +157,10 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
   return (
     <Panel title="Join the queue" className="join-queue-card student-join">
       <p className="student-join-lede">
-        Confirm your contacts, then join only when you are inside the campus GPS
-        zone. Fake-location apps are blocked when possible.
+        {showRejoinHint
+          ? 'You left the queue earlier — you may join again when you are on campus.'
+          : 'Confirm your contacts, then join only when you are inside the campus GPS zone.'}{' '}
+        Fake-location apps are blocked when possible.
       </p>
       {profile?.full_name ? (
         <p className="muted join-queue-name">{profile.full_name}</p>
@@ -318,11 +325,18 @@ export default function JoinQueueCard({ profile, onJoined, onProfileUpdated }) {
         type="button"
         className={`btn btn-primary btn-join-gps${busyGps ? ' is-busy' : ''}`}
         onClick={joinQueue}
-        disabled={busyGps || Boolean(editing)}
+        disabled={busyGps || Boolean(editing) || joinDisabled}
         aria-busy={busyGps}
+        title={
+          joinDisabled
+            ? 'You cannot join the queue again after a desk decision'
+            : undefined
+        }
       >
         <GpsPinIcon className="btn-join-gps-icon" size={18} />
-        <span>{buttonLabel(busyGps && phase === 'idle' ? 'locating' : phase)}</span>
+        <span>
+          {joinDisabled ? 'Queue closed' : buttonLabel(busyGps && phase === 'idle' ? 'locating' : phase)}
+        </span>
       </button>
     </Panel>
   );

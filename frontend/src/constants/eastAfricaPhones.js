@@ -1,16 +1,16 @@
 /** East African dial codes for SMS (international / E.164). */
 export const EAST_AFRICAN_COUNTRIES = [
-  { iso: 'UG', name: 'Uganda', dial: '256', flag: '🇺🇬' },
-  { iso: 'KE', name: 'Kenya', dial: '254', flag: '🇰🇪' },
-  { iso: 'TZ', name: 'Tanzania', dial: '255', flag: '🇹🇿' },
-  { iso: 'RW', name: 'Rwanda', dial: '250', flag: '🇷🇼' },
-  { iso: 'BI', name: 'Burundi', dial: '257', flag: '🇧🇮' },
-  { iso: 'SS', name: 'South Sudan', dial: '211', flag: '🇸🇸' },
-  { iso: 'ET', name: 'Ethiopia', dial: '251', flag: '🇪🇹' },
-  { iso: 'SO', name: 'Somalia', dial: '252', flag: '🇸🇴' },
-  { iso: 'CD', name: 'DR Congo', dial: '243', flag: '🇨🇩' },
-  { iso: 'DJ', name: 'Djibouti', dial: '253', flag: '🇩🇯' },
-  { iso: 'ER', name: 'Eritrea', dial: '291', flag: '🇪🇷' },
+  { iso: 'UG', name: 'Uganda', dial: '256', flag: '🇺🇬', min: 9, max: 9 },
+  { iso: 'KE', name: 'Kenya', dial: '254', flag: '🇰🇪', min: 9, max: 9 },
+  { iso: 'TZ', name: 'Tanzania', dial: '255', flag: '🇹🇿', min: 9, max: 9 },
+  { iso: 'RW', name: 'Rwanda', dial: '250', flag: '🇷🇼', min: 9, max: 9 },
+  { iso: 'BI', name: 'Burundi', dial: '257', flag: '🇧🇮', min: 8, max: 8 },
+  { iso: 'SS', name: 'South Sudan', dial: '211', flag: '🇸🇸', min: 9, max: 9 },
+  { iso: 'ET', name: 'Ethiopia', dial: '251', flag: '🇪🇹', min: 9, max: 9 },
+  { iso: 'SO', name: 'Somalia', dial: '252', flag: '🇸🇴', min: 8, max: 9 },
+  { iso: 'CD', name: 'DR Congo', dial: '243', flag: '🇨🇩', min: 9, max: 9 },
+  { iso: 'DJ', name: 'Djibouti', dial: '253', flag: '🇩🇯', min: 8, max: 8 },
+  { iso: 'ER', name: 'Eritrea', dial: '291', flag: '🇪🇷', min: 7, max: 7 },
 ];
 
 const DEFAULT_DIAL = '256';
@@ -73,9 +73,54 @@ export function splitPhone(phone) {
   return { dial: DEFAULT_DIAL, national: digits };
 }
 
-export function isValidE164(phone) {
+/**
+ * Match backend validate_east_africa_phone — full national length required.
+ */
+export function validateEastAfricaPhone(phone) {
   const value = String(phone || '').trim();
-  if (!/^\+\d{10,15}$/.test(value)) return false;
+  if (!value) {
+    return {
+      ok: false,
+      error: 'Telephone number is required for SMS notifications.',
+    };
+  }
+  if (!value.startsWith('+')) {
+    return {
+      ok: false,
+      error: 'Phone must include a country code (select Uganda, Kenya, etc.).',
+    };
+  }
+
   const digits = value.slice(1);
-  return EAST_AFRICAN_COUNTRIES.some((c) => digits.startsWith(c.dial));
+  const country = EAST_AFRICAN_COUNTRIES.find((c) => digits.startsWith(c.dial));
+  if (!country) {
+    return {
+      ok: false,
+      error:
+        'Use an East African country code (Uganda +256, Kenya +254, Tanzania +255, etc.).',
+    };
+  }
+
+  let national = digits.slice(country.dial.length);
+  if (national.startsWith('0')) {
+    national = national.replace(/^0+/, '');
+  }
+
+  const min = country.min ?? 9;
+  const max = country.max ?? 9;
+  if (!/^\d+$/.test(national) || national.length < min || national.length > max) {
+    const example = country.dial === '256' ? '7XXXXXXXX' : 'XXXXXXXXX';
+    return {
+      ok: false,
+      error: `Enter a valid ${country.name} mobile number (${min}${
+        max !== min ? `–${max}` : ''
+      } digits after +${country.dial}, e.g. ${example}).`,
+    };
+  }
+
+  return { ok: true, value: `+${country.dial}${national}` };
+}
+
+export function isValidE164(phone) {
+  return validateEastAfricaPhone(phone).ok;
 }

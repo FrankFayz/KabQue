@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { clearAuth, getStoredUser } from '../../api';
-import { isMainAdmin } from '../../authRoles';
+import { isMainAdmin, isStudent, isSupervisor } from '../../authRoles';
 
 export default function NavBar() {
   const user = getStoredUser();
@@ -26,24 +26,19 @@ export default function NavBar() {
 
       {user && (
         <div className="nav-actions">
-          {user.role === 'student' && (
+          {isStudent(user) && (
             <Link to="/student" className="nav-link">
               My queue
             </Link>
           )}
-          {isMainAdmin(user) && (
-            <>
-              <Link to="/main-admin" className="nav-link">
-                Main Admin
-              </Link>
-              <Link to="/admin" className="nav-link">
-                Supervisors
-              </Link>
-            </>
-          )}
-          {!isMainAdmin(user) && (user.role === 'admin' || user.is_staff) && (
+          {isSupervisor(user) && (
             <Link to="/admin" className="nav-link">
               Desk
+            </Link>
+          )}
+          {isMainAdmin(user) && (
+            <Link to="/main-admin" className="nav-link">
+              Main Admin
             </Link>
           )}
           <button type="button" className="btn btn-header-signin" onClick={logout}>

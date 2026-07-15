@@ -178,6 +178,12 @@ CAMPUS_LONGITUDE = float(os.getenv("CAMPUS_LONGITUDE", "32.290275"))
 CAMPUS_RADIUS_METERS = float(os.getenv("CAMPUS_RADIUS_METERS", "500000"))
 GPS_ENFORCEMENT = os.getenv("GPS_ENFORCEMENT", "True").lower() in ("1", "true", "yes")
 CAMPUS_NAME = os.getenv("CAMPUS_NAME", "Uganda (nationwide testing)")
+# True while QA can join from anywhere in Uganda. Set False for Kabale campus only.
+NATIONWIDE_GPS_TESTING = os.getenv("NATIONWIDE_GPS_TESTING", "True").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # MySMSGate — SMS via your connected Android phone
 MYSMSGATE_API_KEY = _clean_env(os.getenv("MYSMSGATE_API_KEY", ""))

@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth import authenticate, get_user_model
 from django.conf import settings
 from django.db import transaction
@@ -89,7 +91,7 @@ def _reject_if_locked(user_obj, password):
 
 
 class IsQueueAdmin(permissions.BasePermission):
-    """Approved supervisors only (desk operations)."""
+    """Approved desk supervisors only (not Main Admin, not students)."""
 
     def has_permission(self, request, view):
         return bool(
@@ -100,7 +102,7 @@ class IsQueueAdmin(permissions.BasePermission):
 
 
 class IsMainAdmin(permissions.BasePermission):
-    """System Main Admins (username contains #@admin@#)."""
+    """System Main Admins only."""
 
     def has_permission(self, request, view):
         return bool(
@@ -110,29 +112,48 @@ class IsMainAdmin(permissions.BasePermission):
         )
 
 
+class IsStudent(permissions.BasePermission):
+    """Fresher accounts only."""
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and getattr(request.user, "is_student_user", False)
+        )
+
+
 def tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
-    payload = {
+    return {
         "refresh": str(refresh),
         "access": str(refresh.access_token),
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "phone": user.phone,
-            "role": user.role,
-            "is_approved": user.is_approved,
-            "email_verified": bool(getattr(user, "email_verified", True)),
-            "is_main_admin": user.is_main_admin,
-            "is_staff": user.is_staff,
-            "is_active": user.is_active,
-            "full_name": user.get_full_name() or user.username,
-        },
+        "user": user_public_payload(user),
+    }
+
+
+def user_public_payload(user):
+    """Auth user fields without minting new JWT tokens."""
+    data = {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+        "is_approved": user.is_approved,
+        "email_verified": bool(getattr(user, "email_verified", True)),
+        "is_main_admin": user.is_main_admin,
+        "is_staff": user.is_staff,
+        "is_active": user.is_active,
+        "full_name": user.get_full_name() or user.username,
     }
     if hasattr(user, "profile"):
-        payload["user"]["profile_complete"] = user.profile.is_profile_complete
-        payload["user"]["registration_number"] = user.profile.registration_number
-    return payload
+        data["profile_complete"] = user.profile.is_profile_complete
+        data["registration_number"] = user.profile.registration_number
+        outcome = (user.profile.desk_outcome or "").strip().lower()
+        if outcome in ("approved", "rejected"):
+            data["desk_outcome"] = outcome
+    return data
 
 
 def get_queue_entry(profile):
@@ -230,6 +251,22 @@ def recompact_batch_positions(batch_id):
             entry.save(update_fields=["position", "updated_at"])
 
 
+def count_batch_leftovers():
+    """
+    Fast leftover count for desk stats — same people as collect_batch_leftovers(),
+    without walking every batch on each refresh.
+    """
+    return (
+        NotificationLog.objects.filter(
+            queue_entry__isnull=False,
+            queue_entry__status__in=ACTIVE_BATCH_STATUSES,
+        )
+        .values("queue_entry_id")
+        .distinct()
+        .count()
+    )
+
+
 def collect_batch_leftovers(exclude_batch_ids=None):
     """
     Unapproved students still sitting in any open batch result table.
@@ -320,11 +357,38 @@ def can_reschedule_entry(entry) -> bool:
     ) or bool(entry.scheduled_date)
 
 
+def _place_waiting_near_front(entry):
+    """
+    Priority return: never dump to the end of waiting.
+    Sit behind ~20% of current waiters (near the front), ahead of the rest.
+    """
+    waiters = list(
+        QueueEntry.objects.filter(status=QueueEntry.Status.WAITING)
+        .exclude(pk=entry.pk)
+        .order_by("created_at", "id")
+    )
+    if not waiters:
+        return
+
+    slot = max(0, len(waiters) // 5)
+    if slot == 0:
+        entry.created_at = waiters[0].created_at - timedelta(milliseconds=1)
+        return
+
+    left = waiters[slot - 1].created_at
+    if slot >= len(waiters):
+        entry.created_at = waiters[-1].created_at + timedelta(milliseconds=1)
+        return
+
+    right = waiters[slot].created_at
+    delta = right - left
+    entry.created_at = left + (delta / 2 if delta.total_seconds() > 0 else timedelta(milliseconds=1))
+
+
 def return_student_to_waiting_queue(entry):
     """
-    Student cannot attend their assigned day: clear the assignment and place them
-    at the back of the waiting queue. They do not choose a new date — they wait
-    until a supervisor notifies the next batch.
+    Clear day / # / secret and return to waiting for a future notify.
+    Placed nearer the front of waiting (priority queue) — not at the end.
     """
     # Leave today's batch result table; they wait for a future notify, not this day
     detach_entry_from_batches(entry)
@@ -337,8 +401,7 @@ def return_student_to_waiting_queue(entry):
     entry.checked_in_at = None
     entry.verified_at = None
     entry.verification_notes = ""
-    # Re-join by current time so they wait behind current waiters (fair FCFS)
-    entry.created_at = timezone.now()
+    _place_waiting_near_front(entry)
     entry.save(
         update_fields=[
             "status",
@@ -409,6 +472,79 @@ def apply_reschedule(entry, scheduled_date, *, notify=True, channel="both", posi
     return code, channels
 
 
+def build_student_day_progress(entry):
+    """
+    Live progress for a fresher who has been notified for a specific approval day.
+
+    total   = students still counted for that batch (shrinks on voluntary leave)
+    finished = desk clears today (approve / reject / defer) = total − remaining
+    remaining = still expected at the desk for that session
+
+    Only for students currently on a notified day — never while merely waiting.
+    """
+    if entry is None:
+        return None
+    if entry.status == QueueEntry.Status.WAITING:
+        return None
+    if entry.status in (
+        QueueEntry.Status.APPROVED,
+        QueueEntry.Status.REJECTED,
+    ):
+        return None
+    if not entry.scheduled_date or not has_batch_queue_number(entry):
+        return None
+
+    batch = None
+    bids = batch_ids_for_entry(entry.id)
+    if bids:
+        batch = (
+            NotificationBatch.objects.filter(id__in=list(bids))
+            .order_by("-created_at", "-id")
+            .first()
+        )
+
+    your_pos = entry.position
+    ahead_today = 0
+
+    if batch is not None:
+        total = max(1, int(batch.batch_size or 1))
+        live = live_batch_entries(batch.id)
+        remaining = len(live)
+        for peer in live:
+            if peer.id == entry.id:
+                continue
+            if (
+                peer.position is not None
+                and your_pos is not None
+                and peer.position < your_pos
+            ):
+                ahead_today += 1
+    else:
+        live_qs = QueueEntry.objects.filter(
+            scheduled_date=entry.scheduled_date,
+            status__in=ACTIVE_BATCH_STATUSES,
+        )
+        remaining = live_qs.count()
+        total = max(remaining, int(your_pos or remaining or 1), 1)
+        if your_pos is not None:
+            ahead_today = live_qs.filter(position__lt=your_pos).exclude(id=entry.id).count()
+
+    finished = max(0, min(total, total - remaining))
+    percent = int(round((finished / total) * 100)) if total else 0
+    percent = max(0, min(100, percent))
+
+    return {
+        "scheduled_date": entry.scheduled_date.isoformat(),
+        "total": total,
+        "finished": finished,
+        "remaining": remaining,
+        "percent": percent,
+        "your_number": your_pos,
+        "ahead_today": ahead_today,
+        "batch_id": batch.id if batch else None,
+    }
+
+
 def remove_queue_entry(entry):
     """Delete live queue row; keep notification logs by nulling their FK first."""
     NotificationLog.ensure_nullable_queue_entry()
@@ -449,7 +585,7 @@ def build_queue_counts():
     counts["approved"] = approved_profiles + approved_live
     counts["rejected"] = rejected_profiles + rejected_live
     counts["remaining"] = counts["waiting"] or 0
-    leftover_n = len(collect_batch_leftovers())
+    leftover_n = count_batch_leftovers()
     counts["batch_leftovers"] = leftover_n
     counts["notify_pool"] = (counts["waiting"] or 0) + leftover_n
     return counts
@@ -955,9 +1091,8 @@ class LoginView(APIView):
 
 class MeView(APIView):
     def get(self, request):
-        data = tokens_for_user(request.user)
-        del data["refresh"]
-        del data["access"]
+        # Do not mint fresh JWTs on every /auth/me/ — that slows student refresh.
+        data = {"user": user_public_payload(request.user)}
         if hasattr(request.user, "profile"):
             entry = get_queue_entry(request.user.profile)
             data["in_queue"] = entry is not None
@@ -974,43 +1109,48 @@ class MeView(APIView):
 
 
 class StudentQueueStatusView(APIView):
+    permission_classes = [IsStudent]
+
     def get(self, request):
         if not hasattr(request.user, "profile"):
             return Response(
                 {"detail": "No student profile."}, status=status.HTTP_404_NOT_FOUND
             )
-        if request.user.role != User.Role.STUDENT:
-            return Response(
-                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
-            )
 
-        clear_waiting_batch_numbers()
         profile = request.user.profile
         entry = get_queue_entry(profile)
+        outcome = (profile.desk_outcome or "").strip().lower()
         if not entry:
-            return Response(
-                {
-                    "in_queue": False,
-                    "profile_complete": profile.is_profile_complete,
-                    "profile": profile_payload(profile, request),
-                }
-            )
+            payload = {
+                "in_queue": False,
+                "profile_complete": profile.is_profile_complete,
+                "profile": profile_payload(profile, request),
+            }
+            if outcome in ("approved", "rejected"):
+                payload["desk_outcome"] = outcome
+                payload["desk_finalized"] = True
+            return Response(payload)
         ahead = waiting_ahead_count(entry)
         payload = QueueEntrySerializer(entry, context={"request": request}).data
         payload["in_queue"] = True
         payload["profile_complete"] = profile.is_profile_complete
         payload["students_ahead_waiting"] = ahead
         payload["has_batch_number"] = has_batch_queue_number(entry)
+        day_progress = build_student_day_progress(entry)
+        if day_progress:
+            payload["day_progress"] = day_progress
         return Response(payload)
 
 
 class CompleteStudentProfileView(APIView):
     """Fresher completes bio + faculty details before GPS join."""
 
+    permission_classes = [IsStudent]
+
     def post(self, request):
-        if not hasattr(request.user, "profile") or request.user.role != User.Role.STUDENT:
+        if not hasattr(request.user, "profile"):
             return Response(
-                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+                {"detail": "No student profile."}, status=status.HTTP_404_NOT_FOUND
             )
         serializer = CompleteStudentProfileSerializer(
             data=request.data, context={"request": request}
@@ -1030,15 +1170,13 @@ class CompleteStudentProfileView(APIView):
 class JoinQueueView(APIView):
     """Student joins the priority queue only after profile + on-campus GPS verification."""
 
+    permission_classes = [IsStudent]
+
     @transaction.atomic
     def post(self, request):
         if not hasattr(request.user, "profile"):
             return Response(
                 {"detail": "No student profile."}, status=status.HTTP_404_NOT_FOUND
-            )
-        if request.user.role != User.Role.STUDENT:
-            return Response(
-                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
             )
 
         profile = request.user.profile
@@ -1058,20 +1196,41 @@ class JoinQueueView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        outcome = (profile.desk_outcome or "").strip().lower()
+        if outcome == "approved":
+            return Response(
+                {
+                    "detail": (
+                        "Your documents were already approved at the desk. "
+                        "You cannot join the queue again."
+                    ),
+                    "desk_outcome": "approved",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if outcome == "rejected":
+            return Response(
+                {
+                    "detail": (
+                        "Your visit was already completed at the desk and "
+                        "documents were not accepted. You cannot join the queue again."
+                    ),
+                    "desk_outcome": "rejected",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = JoinQueueSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         profile.registered_latitude = serializer.validated_data["latitude"]
         profile.registered_longitude = serializer.validated_data["longitude"]
         profile.joined_queue_at = timezone.now()
-        # Fresh join clears any prior desk outcome so counts stay accurate
-        profile.desk_outcome = ""
         profile.save(
             update_fields=[
                 "registered_latitude",
                 "registered_longitude",
                 "joined_queue_at",
-                "desk_outcome",
             ]
         )
 
@@ -1121,11 +1280,13 @@ class JoinQueueView(APIView):
 class StudentRescheduleView(APIView):
     """Student cannot attend: return to waiting queue (no self-chosen date)."""
 
+    permission_classes = [IsStudent]
+
     @transaction.atomic
     def post(self, request):
-        if not hasattr(request.user, "profile") or request.user.role != User.Role.STUDENT:
+        if not hasattr(request.user, "profile"):
             return Response(
-                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+                {"detail": "No student profile."}, status=status.HTTP_404_NOT_FOUND
             )
         entry = get_queue_entry(request.user.profile)
         if not entry:
@@ -1152,9 +1313,9 @@ class StudentRescheduleView(APIView):
         return Response(
             {
                 "message": (
-                    "You have been returned to the waiting queue. "
-                    "You cannot choose a priority date — please wait until "
-                    "the supervisor notifies the next approval schedule."
+                    "You have been returned to waiting nearer the front of the "
+                    "priority queue (not the end). You cannot choose a date — "
+                    "wait until the supervisor notifies the next schedule."
                 ),
                 "queue": payload,
             }
@@ -1164,11 +1325,13 @@ class StudentRescheduleView(APIView):
 class StudentLeaveQueueView(APIView):
     """Remove the student from the queue (cancel assignment / leave for other priorities)."""
 
+    permission_classes = [IsStudent]
+
     @transaction.atomic
     def post(self, request):
-        if not hasattr(request.user, "profile") or request.user.role != User.Role.STUDENT:
+        if not hasattr(request.user, "profile"):
             return Response(
-                {"detail": "Student access only."}, status=status.HTTP_403_FORBIDDEN
+                {"detail": "No student profile."}, status=status.HTTP_404_NOT_FOUND
             )
         entry = get_queue_entry(request.user.profile)
         if not entry:
@@ -1185,11 +1348,27 @@ class StudentLeaveQueueView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Shrink day's notified total so progress does not treat voluntary exit
+        # as a desk finish; then recompact remaining #1…K like approve/reject.
+        linked_batch_ids = batch_ids_for_entry(entry.id)
         remove_queue_entry(entry)
+        for bid in linked_batch_ids:
+            batch = NotificationBatch.objects.filter(pk=bid).first()
+            if batch:
+                live_n = len(live_batch_entries(bid))
+                new_size = max(live_n, max(0, int(batch.batch_size or 0) - 1))
+                if new_size != batch.batch_size:
+                    batch.batch_size = new_size
+                    batch.save(update_fields=["batch_size"])
+            recompact_batch_positions(bid)
+
         profile = request.user.profile
         return Response(
             {
-                "message": "You have left the queue.",
+                "message": (
+                    "You have left the queue. You can rejoin on campus whenever you are ready."
+                ),
+                "can_rejoin": True,
                 "in_queue": False,
                 "profile_complete": profile.is_profile_complete,
                 "profile": profile_payload(profile, request),
@@ -1201,7 +1380,7 @@ class AdminDashboardView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
-        clear_waiting_batch_numbers()
+        # Read-only: do not clear batch numbers on every poll (keeps refresh fast).
         counts = build_queue_counts()
         by_faculty = list(
             QueueEntry.objects.values("student__faculty")
@@ -1241,7 +1420,7 @@ class AdminQueueListView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
-        clear_waiting_batch_numbers()
+        # Read-only: clearing waiting positions belongs on notify/join/delete, not list.
         qs = (
             QueueEntry.objects.select_related("student", "student__user")
             .all()
@@ -1612,7 +1791,7 @@ class VerifyCodeView(APIView):
 
 
 class CompleteVerificationView(APIView):
-    """Approve / reject / mark no-show after identity confirmation."""
+    """Approve / reject / return to waiting after identity confirmation."""
 
     permission_classes = [IsQueueAdmin]
 
@@ -1647,30 +1826,29 @@ class CompleteVerificationView(APIView):
             )
 
         decision = serializer.validated_data["decision"]
-        if (
-            decision in ("approved", "rejected")
-            and entry.status
-            not in (
-                QueueEntry.Status.CHECKED_IN,
-                QueueEntry.Status.NOTIFIED,
-            )
+        if entry.status not in (
+            QueueEntry.Status.CHECKED_IN,
+            QueueEntry.Status.NOTIFIED,
+            QueueEntry.Status.SKIPPED,
         ):
             return Response(
                 {
-                    "detail": "Confirm identity with the secret code before approving or rejecting."
+                    "detail": (
+                        "Confirm identity with the secret code before "
+                        "approving, rejecting, or sending back to the queue."
+                    )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        notes = serializer.validated_data.get("notes", "")
         removed_from_queue = False
+        returned_to_waiting = False
         entry_payload = None
         removed_queue_entry_id = entry.id
         linked_batch_ids = batch_ids_for_entry(entry.id)
 
         try:
             if decision in ("approved", "rejected"):
-                # Record desk outcome on the profile (survives leaving the live queue).
                 CampusSettings.ensure_lifetime_columns()
                 campus = CampusSettings.get_solo()
                 profile = entry.student
@@ -1689,17 +1867,12 @@ class CompleteVerificationView(APIView):
                 for bid in linked_batch_ids:
                     recompact_batch_positions(bid)
             else:
-                entry.status = decision
-                entry.verified_at = timezone.now()
-                entry.verification_notes = notes
-                entry.save(
-                    update_fields=[
-                        "status",
-                        "verified_at",
-                        "verification_notes",
-                        "updated_at",
-                    ]
-                )
+                # back_to_queue — leave batch, wait near the front for next notify
+                return_student_to_waiting_queue(entry)
+                returned_to_waiting = True
+                for bid in linked_batch_ids:
+                    recompact_batch_positions(bid)
+                entry.refresh_from_db()
                 entry_payload = AdminQueueEntrySerializer(entry).data
         except Exception:
             return Response(
@@ -1714,26 +1887,34 @@ class CompleteVerificationView(APIView):
 
         counts = build_queue_counts()
         labels = {
-            "approved": "Approved — documents accepted. Student removed from the live queue and batch table.",
-            "rejected": "Rejected — documents not accepted. Student removed from the live queue and batch table.",
-            "skipped": "Marked as no-show. Student stays in the batch for end-of-day reschedule.",
+            "approved": (
+                "Approved — documents accepted. Student removed from the live "
+                "queue and batch table."
+            ),
+            "rejected": (
+                "Rejected — documents not accepted. Student removed from the live "
+                "queue and batch table."
+            ),
+            "back_to_queue": (
+                "Returned to waiting nearer the front of the priority queue "
+                "(not the end). Cleared from today’s batch until the next notify."
+            ),
         }
 
         active_batch = None
         batch_payload = None
         if linked_batch_ids:
-            # Prefer the most recent linked batch that still has remaining students
             for bid in sorted(linked_batch_ids, reverse=True):
                 batch = NotificationBatch.objects.filter(id=bid).first()
                 if not batch:
                     continue
                 live = live_batch_entries(bid)
-                if decision in ("approved", "rejected") or live:
+                if decision in ("approved", "rejected", "back_to_queue") or live:
                     active_batch = batch
                     batch_payload = build_live_batch_payload(batch)
                     break
             if active_batch is None and linked_batch_ids:
-                batch = NotificationBatch.objects.filter(id=linked_batch_ids[-1]).first()
+                batch = NotificationBatch.objects.filter(id=max(linked_batch_ids)).first()
                 if batch:
                     active_batch = batch
                     batch_payload = build_live_batch_payload(batch)
@@ -1743,8 +1924,9 @@ class CompleteVerificationView(APIView):
                 "message": labels.get(decision, f"Marked as {decision}."),
                 "entry": entry_payload,
                 "removed_from_queue": removed_from_queue,
+                "returned_to_waiting": returned_to_waiting,
                 "removed_queue_entry_id": removed_queue_entry_id
-                if removed_from_queue
+                if (removed_from_queue or returned_to_waiting)
                 else None,
                 "counts": counts,
                 "batch": batch_payload,
@@ -2022,13 +2204,35 @@ class CampusSettingsView(APIView):
         return Response(serializer.data)
 
 
+def _main_admin_accounts_qs():
+    """All Main Admin accounts (role and/or #@admin@# username marker)."""
+    return User.objects.filter(
+        Q(role=User.Role.MAIN_ADMIN) | Q(username__contains="#@admin@#")
+    ).distinct()
+
+
+def _user_is_main_admin_account(user) -> bool:
+    return bool(
+        user
+        and (
+            getattr(user, "is_main_admin", False)
+            or user.role == User.Role.MAIN_ADMIN
+            or "#@admin@#" in str(user.username or "")
+        )
+    )
+
+
 def _main_admin_student_row(profile):
     try:
         entry = profile.queue_entry
     except QueueEntry.DoesNotExist:
         entry = None
+    outcome = (profile.desk_outcome or "").strip().lower()
     if entry is None:
-        verification_status = "not_in_queue"
+        # Desk finalize beats "not in queue"; voluntary leavers stay not_in_queue.
+        verification_status = (
+            outcome if outcome in ("approved", "rejected") else "not_in_queue"
+        )
         queue_position = None
         scheduled_date = None
     else:
@@ -2046,11 +2250,14 @@ def _main_admin_student_row(profile):
         "is_approved": user.is_approved,
         "is_active": user.is_active,
         "is_locked": not user.is_active,
+        "is_main_admin": False,
+        "is_self": False,
         "date_joined": user.date_joined,
         "registration_number": profile.registration_number,
         "faculty": profile.faculty or "",
         "programme": profile.programme or "",
         "profile_complete": profile.is_profile_complete,
+        "desk_outcome": outcome if outcome in ("approved", "rejected") else "",
         "verification_status": verification_status,
         "queue_position": (
             None
@@ -2061,7 +2268,8 @@ def _main_admin_student_row(profile):
     }
 
 
-def _main_admin_staff_row(user):
+def _main_admin_staff_row(user, *, viewer=None):
+    is_main = _user_is_main_admin_account(user)
     return {
         "id": user.id,
         "username": user.username,
@@ -2073,6 +2281,8 @@ def _main_admin_staff_row(user):
         "email_verified": bool(getattr(user, "email_verified", True)),
         "is_active": user.is_active,
         "is_locked": not user.is_active,
+        "is_main_admin": is_main,
+        "is_self": bool(viewer is not None and user.pk == viewer.pk),
         "date_joined": user.date_joined,
         "registration_number": "",
         "faculty": "",
@@ -2092,9 +2302,10 @@ def _main_admin_staff_row(user):
     }
 
 
-def _main_admin_manageable_target(request, user_id):
+def _main_admin_manageable_target(request, user_id, *, allow_main_admins=True):
     """
-    Resolve a student or supervisor the current Main Admin may manage.
+    Resolve an account the current Main Admin may lock or delete.
+    Never allows modifying yourself. Other Main Admins are allowed (except last one).
     Returns (user, error_response).
     """
     target = User.objects.filter(pk=user_id).first()
@@ -2104,20 +2315,65 @@ def _main_admin_manageable_target(request, user_id):
         )
     if target.pk == request.user.pk:
         return None, Response(
-            {"detail": "You cannot modify your own account here."},
+            {
+                "detail": (
+                    "You cannot lock or delete your own account here. "
+                    "Ask another Main Admin if you need that done."
+                )
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
-    if target.is_main_admin or target.role == User.Role.MAIN_ADMIN:
-        return None, Response(
-            {"detail": "Main Admin accounts cannot be locked or deleted here."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+
+    target_is_main = _user_is_main_admin_account(target)
+    if target_is_main:
+        if not allow_main_admins:
+            return None, Response(
+                {"detail": "Main Admin accounts cannot be changed here."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return target, None
+
     if target.role not in (User.Role.STUDENT, User.Role.ADMIN):
         return None, Response(
-            {"detail": "Only students and supervisors can be managed."},
+            {"detail": "Only students, supervisors, and Main Admins can be managed."},
             status=status.HTTP_400_BAD_REQUEST,
         )
     return target, None
+
+
+def _guard_last_main_admin(target, *, locking=False):
+    """
+    Keep at least one Main Admin who can still sign in.
+    Returns an error Response, or None if the action is allowed.
+    """
+    if not _user_is_main_admin_account(target):
+        return None
+
+    others = _main_admin_accounts_qs().exclude(pk=target.pk)
+    if not others.exists():
+        return Response(
+            {
+                "detail": (
+                    "You cannot remove the only Main Admin. "
+                    "Register another Main Admin first, then try again."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if locking:
+        other_active = others.filter(is_active=True).count()
+        if other_active == 0:
+            return Response(
+                {
+                    "detail": (
+                        "You cannot lock the last active Main Admin. "
+                        "Unlock or create another Main Admin first."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    return None
 
 
 def _permanently_delete_user(target: User) -> tuple[str, dict]:
@@ -2125,10 +2381,16 @@ def _permanently_delete_user(target: User) -> tuple[str, dict]:
     Delete user and related KabQue data (profile, queue row, notification links).
 
     Returns (message, fresh build_queue_counts()).
-    Live desk totals (Total / To schedule / Notified / Checked in / Approved)
-    recompute from remaining QueueEntry + StudentProfile.desk_outcome rows.
+    Live desk totals recompute from remaining QueueEntry + StudentProfile.desk_outcome.
+    Main Admin accounts: batches they created stay (created_by set null); the user row goes.
     """
-    role_label = "student" if target.role == User.Role.STUDENT else "supervisor"
+    if _user_is_main_admin_account(target):
+        role_label = "Main Admin"
+    elif target.role == User.Role.STUDENT:
+        role_label = "student"
+    else:
+        role_label = "supervisor"
+
     label = target.email or target.username
     batch_ids: set[int] = set()
     removed_from_queue = False
@@ -2139,6 +2401,8 @@ def _permanently_delete_user(target: User) -> tuple[str, dict]:
             label = target.profile.registration_number
         except StudentProfile.DoesNotExist:
             pass
+    elif _user_is_main_admin_account(target):
+        label = target.username or target.email or f"user #{target.pk}"
 
     try:
         profile = target.profile
@@ -2209,7 +2473,10 @@ def _permanently_delete_user(target: User) -> tuple[str, dict]:
     elif removed_from_queue:
         status_note = " Removed from live queue."
 
-    message = f"{role_label.capitalize()} {label} permanently deleted.{status_note}"
+    message = (
+        f"{'Main Admin' if role_label == 'Main Admin' else role_label.capitalize()} "
+        f"{label} permanently deleted.{status_note}"
+    )
     return message, counts
 
 
@@ -2221,12 +2488,9 @@ class MainAdminOverviewView(APIView):
     def get(self, request):
         freshers = StudentProfile.objects.count()
         supervisors = User.objects.filter(role=User.Role.ADMIN).exclude(
-            role=User.Role.MAIN_ADMIN
-        )
-        # Role.ADMIN users only; also catch marker usernames for main admins
-        main_admins = User.objects.filter(
             Q(role=User.Role.MAIN_ADMIN) | Q(username__contains="#@admin@#")
-        ).distinct()
+        )
+        main_admins = _main_admin_accounts_qs()
         pending = supervisors.filter(is_approved=False).count()
         approved_supervisors = supervisors.filter(is_approved=True).count()
         return Response(
@@ -2270,14 +2534,8 @@ class MainAdminAdminsView(APIView):
     permission_classes = [IsMainAdmin]
 
     def get(self, request):
-        qs = (
-            User.objects.filter(
-                Q(role=User.Role.MAIN_ADMIN) | Q(username__contains="#@admin@#")
-            )
-            .distinct()
-            .order_by("-date_joined")
-        )
-        rows = [_main_admin_staff_row(u) for u in qs]
+        qs = _main_admin_accounts_qs().order_by("-date_joined")
+        rows = [_main_admin_staff_row(u, viewer=request.user) for u in qs]
         return Response({"total": len(rows), "results": rows})
 
 
@@ -2297,7 +2555,7 @@ class MainAdminSupervisorsView(APIView):
             qs = qs.filter(is_approved=False)
         elif status_filter == "approved":
             qs = qs.filter(is_approved=True)
-        rows = [_main_admin_staff_row(u) for u in qs]
+        rows = [_main_admin_staff_row(u, viewer=request.user) for u in qs]
         return Response({"total": len(rows), "results": rows})
 
 
@@ -2354,7 +2612,7 @@ class MainAdminApproveSupervisorView(APIView):
 
 
 class MainAdminLockUserView(APIView):
-    """Lock or unlock a student / supervisor account (blocks sign-in when locked)."""
+    """Lock or unlock a student, supervisor, or other Main Admin (blocks sign-in)."""
 
     permission_classes = [IsMainAdmin]
 
@@ -2369,6 +2627,11 @@ class MainAdminLockUserView(APIView):
             return err
 
         lock = bool(serializer.validated_data["lock"])
+        if lock:
+            last_err = _guard_last_main_admin(target, locking=True)
+            if last_err:
+                return last_err
+
         target.is_active = not lock
         target.save(update_fields=["is_active"])
         label = target.email or getattr(
@@ -2384,14 +2647,14 @@ class MainAdminLockUserView(APIView):
                 "user": (
                     _main_admin_student_row(target.profile)
                     if target.role == User.Role.STUDENT and hasattr(target, "profile")
-                    else _main_admin_staff_row(target)
+                    else _main_admin_staff_row(target, viewer=request.user)
                 ),
             }
         )
 
 
 class MainAdminDeleteUserView(APIView):
-    """Permanently delete a student or supervisor and related KabQue data."""
+    """Permanently delete a student, supervisor, or other Main Admin and related data."""
 
     permission_classes = [IsMainAdmin]
 
@@ -2404,6 +2667,10 @@ class MainAdminDeleteUserView(APIView):
         )
         if err:
             return err
+
+        last_err = _guard_last_main_admin(target, locking=False)
+        if last_err:
+            return last_err
 
         message, counts = _permanently_delete_user(target)
         return Response(

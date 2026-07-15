@@ -3,11 +3,12 @@
  * Mock location apps can still cheat — these heuristics raise the bar cleanly.
  */
 
-const MAX_ACCURACY_M = 80;
+// Keep in sync with backend queueapp.geo.MAX_JOIN_ACCURACY_M
+const MAX_ACCURACY_M = 500;
 const SAMPLE_COUNT = 3;
 const SAMPLE_GAP_MS = 850;
-const MAX_SAMPLE_SPREAD_M = 50;
-const MAX_FIX_AGE_MS = 8_000;
+const MAX_SAMPLE_SPREAD_M = 120;
+const MAX_FIX_AGE_MS = 12_000;
 
 function toRad(deg) {
   return (deg * Math.PI) / 180;

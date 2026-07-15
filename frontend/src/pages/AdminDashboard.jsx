@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { api, getStoredUser } from '../api';
-import { isMainAdmin } from '../authRoles';
+import { api } from '../api';
 import AdminStats from '../components/admin/AdminStats';
 import AnalyticsBreakdown from '../components/admin/AnalyticsBreakdown';
 import BatchResultTable from '../components/admin/BatchResultTable';
@@ -11,7 +9,6 @@ import VerifyCodePanel from '../components/admin/VerifyCodePanel';
 import Alert from '../components/ui/Alert';
 
 export default function AdminDashboard() {
-  const viewingAsMainAdmin = isMainAdmin(getStoredUser());
   const [dash, setDash] = useState(null);
   const [queue, setQueue] = useState([]);
   const [status, setStatus] = useState('');
@@ -38,44 +35,46 @@ export default function AdminDashboard() {
   const [lastSynced, setLastSynced] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNote, setRefreshNote] = useState('');
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const [searchApplied, setSearchApplied] = useState('');
   const loadSeq = useRef(0);
   const statusRef = useRef(status);
-  const searchRef = useRef(search);
+  const searchRef = useRef(searchApplied);
   const notifyResultRef = useRef(notifyResult);
+  const batchZoneRef = useRef(null);
   statusRef.current = status;
-  searchRef.current = search;
+  searchRef.current = searchApplied;
   notifyResultRef.current = notifyResult;
 
   const waitingCount = dash?.counts?.remaining ?? dash?.counts?.waiting ?? 0;
   const leftoversCount = dash?.counts?.batch_leftovers ?? 0;
   const schedulePool = waitingCount + leftoversCount;
-  const liveBatchOpen = Boolean(notifyResult?.batch && (notifyResult?.students?.length ?? 0) >= 0);
+  const liveBatchOpen = Boolean(
+    notifyResult?.batch?.id || (notifyResult?.students || []).length > 0
+  );
 
-  const loadBatch = useCallback(async (batchId) => {
-    try {
-      const qs = batchId
-        ? `?batch_id=${batchId}&_=${Date.now()}`
-        : `?_=${Date.now()}`;
-      const data = await api(`/admin/batch/active/${qs}`);
-      if (!data?.batch) return;
-      if (Array.isArray(data.students) && data.students.length > 0) {
-        setNotifyResult(data);
-        return;
-      }
-      setNotifyResult((prev) => {
-        if (prev?.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
-          return prev;
-        }
-        return {
-          ...data,
-          message:
-            data.message ||
-            'No students remain in this batch (approved students leave the table).',
-        };
-      });
-    } catch {
-      // Desk still works without the batch table panel
+  useEffect(() => {
+    const id = setTimeout(() => setSearchApplied(search.trim()), 350);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  const applyBatchPayload = useCallback((data) => {
+    if (!data?.batch) return;
+    if (Array.isArray(data.students) && data.students.length > 0) {
+      setNotifyResult(data);
+      return;
     }
+    setNotifyResult((prev) => {
+      if (prev?.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
+        return prev;
+      }
+      return {
+        ...data,
+        message:
+          data.message ||
+          'No students remain in this batch (approved students leave the table).',
+      };
+    });
   }, []);
 
   const load = useCallback(async ({ manual = false } = {}) => {
@@ -87,22 +86,30 @@ export default function AdminDashboard() {
     }
 
     try {
-      const params = new URLSearchParams();
+      const stamp = String(Date.now());
+      const queueParams = new URLSearchParams();
       const statusFilter = statusRef.current;
       const searchFilter = searchRef.current;
-      if (statusFilter) params.set('status', statusFilter);
-      if (searchFilter) params.set('search', searchFilter);
-      params.set('_', String(Date.now()));
+      if (statusFilter) queueParams.set('status', statusFilter);
+      if (searchFilter) queueParams.set('search', searchFilter);
+      queueParams.set('_', stamp);
 
-      const [d, q] = await Promise.all([
-        api(`/admin/dashboard/?${params.toString()}`),
-        api(`/admin/queue/?${params.toString()}`),
+      const batchId = notifyResultRef.current?.batch?.id;
+      const batchQs = batchId
+        ? `?batch_id=${batchId}&_=${stamp}`
+        : `?_=${stamp}`;
+
+      const [d, q, batchData] = await Promise.all([
+        api(`/admin/dashboard/?_=${stamp}`),
+        api(`/admin/queue/?${queueParams.toString()}`),
+        api(`/admin/batch/active/${batchQs}`).catch(() => null),
       ]);
 
       if (seq !== loadSeq.current) return;
 
       setDash(d);
       setQueue(Array.isArray(q) ? q : []);
+      if (batchData) applyBatchPayload(batchData);
       setLastSynced(new Date());
       setScheduledDate((prev) => {
         if (prev) return prev;
@@ -120,9 +127,6 @@ export default function AdminDashboard() {
         const total = d?.counts?.total ?? (Array.isArray(q) ? q.length : 0);
         setRefreshNote(`Updated · ${total} in queue · ${waiting} waiting`);
       }
-
-      const batchId = notifyResultRef.current?.batch?.id;
-      await loadBatch(batchId || undefined);
     } catch (err) {
       if (seq !== loadSeq.current) return;
       setPageError(err.message || 'Could not refresh desk data.');
@@ -132,15 +136,26 @@ export default function AdminDashboard() {
         setRefreshing(false);
       }
     }
-  }, [loadBatch]);
+  }, [applyBatchPayload]);
 
   useEffect(() => {
     load({ manual: false });
-  }, [status, search, load]);
+  }, [status, searchApplied, load]);
 
   useEffect(() => {
-    const id = setInterval(() => load({ manual: false }), 10000);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (document.hidden) return;
+      load({ manual: false });
+    };
+    const id = setInterval(tick, 30000);
+    const onVis = () => {
+      if (!document.hidden) load({ manual: false });
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [load]);
 
   async function notifyBatch(e) {
@@ -159,8 +174,11 @@ export default function AdminDashboard() {
       });
       setNotifyResult(data);
       if (data.sms_failed) {
+        const why = !data.sms_configured
+          ? ' SMS is not set up on the server yet.'
+          : ' Check student phone numbers or try again later.';
         setNotifyMessage(
-          `Batch sent. Emails ${data.emails_sent ?? 0}, SMS failed ${data.sms_failed}.`
+          `Batch sent. Emails sent: ${data.emails_sent ?? 0}. SMS failed for ${data.sms_failed} student(s).${why}`
         );
       } else {
         setNotifyMessage(
@@ -173,6 +191,9 @@ export default function AdminDashboard() {
         );
       }
       await load({ manual: false });
+      requestAnimationFrame(() => {
+        batchZoneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     } catch (err) {
       setNotifyError(err.message || 'Could not send notifications.');
     } finally {
@@ -198,11 +219,7 @@ export default function AdminDashboard() {
       }
       await load({ manual: false });
     } catch (err) {
-      const detail =
-        err?.data?.detail ||
-        err.message ||
-        'Invalid or already-used secret code.';
-      setVerifyError(String(detail));
+      setVerifyError(err.message || 'Invalid or already-used secret code.');
       setVerified(null);
       setVerifyMessage('');
     } finally {
@@ -235,15 +252,16 @@ export default function AdminDashboard() {
           const nextStudents = prev.students.filter(
             (s) => s.queue_entry_id !== data.removed_queue_entry_id
           );
+          const remainNote =
+            decision === 'back_to_queue'
+              ? `Returned to waiting nearer the front — ${nextStudents.length} remain in today’s batch.`
+              : `Student ${decision}. Removed from batch table — ${nextStudents.length} remain.`;
           return {
             ...prev,
             students: nextStudents,
             notified_count: nextStudents.length,
             remaining_in_batch: nextStudents.length,
-            message:
-              decision === 'approved' || decision === 'rejected'
-                ? `Student ${decision}. Removed from batch table — ${nextStudents.length} remain for end-of-day reschedule.`
-                : prev.message,
+            message: remainNote,
           };
         });
       }
@@ -306,27 +324,20 @@ export default function AdminDashboard() {
 
   const stageHint =
     schedulePool > 0
-      ? `${schedulePool} ready to notify · waiting joiners appear on the Live queue as “Queued” until you send a batch`
+      ? `${schedulePool} ready to schedule`
       : liveBatchOpen
-        ? 'Verify students with their secret code, then approve or reject'
-        : 'Waiting for freshers to join on campus';
+        ? 'Batch open · verify codes'
+        : 'Waiting for campus joiners';
 
   return (
     <section className="dash desk-dash">
       <header className="desk-welcome">
         <div className="desk-welcome-copy">
-          <p className="desk-welcome-kicker">
-            {viewingAsMainAdmin ? 'Main Admin · desk monitor' : 'Supervisor desk'}
-          </p>
-          <h1>KabQue control</h1>
+          <p className="desk-welcome-kicker">Kabale University · Supervisor</p>
+          <h1>Desk control</h1>
           <p className="desk-welcome-lede">{stageHint}</p>
         </div>
         <div className="desk-welcome-actions">
-          {viewingAsMainAdmin ? (
-            <Link to="/main-admin" className="btn btn-secondary">
-              Back to Main Admin
-            </Link>
-          ) : null}
           {lastSynced ? (
             <span className="dash-refreshed">
               {refreshing ? 'Refreshing…' : `Live · ${lastSynced.toLocaleTimeString()}`}
@@ -344,37 +355,6 @@ export default function AdminDashboard() {
         </div>
       </header>
 
-      <ol className="desk-flow" aria-label="Desk workflow">
-        <li className={schedulePool > 0 ? 'is-active' : ''}>
-          <span className="desk-flow-n">1</span>
-          <span className="desk-flow-copy">
-            <strong>Waiting</strong>
-            <em>{waitingCount} joiner{waitingCount === 1 ? '' : 's'}</em>
-          </span>
-        </li>
-        <li className={schedulePool > 0 ? 'is-active' : ''}>
-          <span className="desk-flow-n">2</span>
-          <span className="desk-flow-copy">
-            <strong>Notify batch</strong>
-            <em>Assign day + codes</em>
-          </span>
-        </li>
-        <li>
-          <span className="desk-flow-n">3</span>
-          <span className="desk-flow-copy">
-            <strong>Verify</strong>
-            <em>Secret code at desk</em>
-          </span>
-        </li>
-        <li>
-          <span className="desk-flow-n">4</span>
-          <span className="desk-flow-copy">
-            <strong>Complete</strong>
-            <em>Approve or reject</em>
-          </span>
-        </li>
-      </ol>
-
       <Alert>{pageError}</Alert>
       <Alert>{queueError}</Alert>
       <Alert variant="info">
@@ -382,64 +362,111 @@ export default function AdminDashboard() {
       </Alert>
 
       <AdminStats counts={dash?.counts} />
-      <AnalyticsBreakdown
-        byFaculty={dash?.by_faculty}
-        byProgramme={dash?.by_programme}
-        totalInQueue={dash?.counts?.total ?? 0}
-      />
 
-      <div className="admin-grid">
-        <NotifyBatchForm
-          batchSize={batchSize}
-          scheduledDate={scheduledDate}
-          channel={channel}
-          busy={notifyBusy}
-          remaining={waitingCount}
-          leftovers={leftoversCount}
-          error={notifyError}
-          message={notifyMessage}
-          onBatchSizeChange={setBatchSize}
-          onScheduledDateChange={setScheduledDate}
-          onChannelChange={setChannel}
-          onSubmit={notifyBatch}
-        />
-        <VerifyCodePanel
-          secretCode={secretCode}
-          verified={verified}
-          busy={verifyBusy}
-          error={verifyError}
-          message={verifyMessage}
-          onSecretCodeChange={(value) => {
-            setSecretCode(value);
-            if (verifyError) setVerifyError('');
-          }}
-          onVerify={verifyCode}
-          onComplete={complete}
-          onClear={() => {
-            setVerified(null);
-            setSecretCode('');
-            setVerifyError('');
-            setVerifyMessage('');
-          }}
-        />
-      </div>
+      <section className="desk-zone" aria-labelledby="desk-ops-heading">
+        <header className="desk-zone-head">
+          <div>
+            <p className="desk-zone-kicker">Desk operations</p>
+            <h2 id="desk-ops-heading">Schedule & verify</h2>
+          </div>
+        </header>
+        <div className="admin-grid">
+          <NotifyBatchForm
+            batchSize={batchSize}
+            scheduledDate={scheduledDate}
+            channel={channel}
+            busy={notifyBusy}
+            remaining={waitingCount}
+            leftovers={leftoversCount}
+            error={notifyError}
+            message={notifyMessage}
+            onBatchSizeChange={setBatchSize}
+            onScheduledDateChange={setScheduledDate}
+            onChannelChange={setChannel}
+            onSubmit={notifyBatch}
+          />
+          <VerifyCodePanel
+            secretCode={secretCode}
+            verified={verified}
+            busy={verifyBusy}
+            error={verifyError}
+            message={verifyMessage}
+            onSecretCodeChange={(value) => {
+              setSecretCode(value);
+              if (verifyError) setVerifyError('');
+            }}
+            onVerify={verifyCode}
+            onComplete={complete}
+          />
+        </div>
+      </section>
 
-      <BatchResultTable
-        result={notifyResult}
-        onBatchReschedule={batchReschedule}
-        rescheduleBusy={rescheduleBusy}
-        rescheduleError={rescheduleError}
-        rescheduleMessage={rescheduleMessage}
-      />
-      <QueueTable
-        queue={queue}
-        status={status}
-        search={search}
-        busy={queueBusy || refreshing}
-        onStatusChange={setStatus}
-        onSearchChange={setSearch}
-        onReschedule={rescheduleEntry}
-      />
+      <section
+        className="desk-zone"
+        aria-labelledby="desk-batch-heading"
+        ref={batchZoneRef}
+      >
+        <header className="desk-zone-head">
+          <div>
+            <p className="desk-zone-kicker">Today’s list</p>
+            <h2 id="desk-batch-heading">Batch result table</h2>
+          </div>
+        </header>
+        <BatchResultTable
+          result={notifyResult}
+          onBatchReschedule={batchReschedule}
+          rescheduleBusy={rescheduleBusy}
+          rescheduleError={rescheduleError}
+          rescheduleMessage={rescheduleMessage}
+        />
+      </section>
+
+      <section className="desk-zone" aria-labelledby="desk-queue-heading">
+        <header className="desk-zone-head">
+          <div>
+            <p className="desk-zone-kicker">Lookup</p>
+            <h2 id="desk-queue-heading">Live queue</h2>
+          </div>
+        </header>
+        <QueueTable
+          queue={queue}
+          status={status}
+          search={search}
+          busy={queueBusy || refreshing}
+          onStatusChange={setStatus}
+          onSearchChange={setSearch}
+          onReschedule={rescheduleEntry}
+        />
+      </section>
+
+      <section className="desk-zone desk-zone-insight" aria-labelledby="desk-insight-heading">
+        <header className="desk-zone-head desk-zone-head-insight">
+          <div>
+            <p className="desk-zone-kicker">Insights</p>
+            <h2 id="desk-insight-heading">Faculty & programme breakdown</h2>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowBreakdown((v) => !v)}
+            aria-expanded={showBreakdown}
+          >
+            {showBreakdown ? 'Hide breakdown' : 'Show breakdown'}
+          </button>
+        </header>
+        {showBreakdown ? (
+          <AnalyticsBreakdown
+            byFaculty={dash?.by_faculty}
+            byProgramme={dash?.by_programme}
+            totalInQueue={dash?.counts?.total ?? 0}
+          />
+        ) : (
+          <p className="desk-zone-lede desk-zone-lede-muted">
+            Optional overview of who is in the live queue by faculty and
+            programme. Open when you need reporting — not during desk rush.
+          </p>
+        )}
+      </section>
     </section>
   );
 }

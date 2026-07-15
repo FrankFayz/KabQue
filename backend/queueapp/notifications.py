@@ -207,7 +207,9 @@ def _mysmsgate_hint(status_code: int, detail: str) -> str:
         or "not connected" in lower
         or "no online" in lower
     ):
-        return "MySMSGate device offline"
+        return "MySMSGate device offline — open the app on the gateway phone"
+    if "sim" in lower or "slot" in lower:
+        return "Wrong SIM slot on server (use 0 for SIM 1, or leave blank for auto)"
     if "phone" in lower or "number" in lower or "invalid to" in lower:
         return "Invalid recipient phone"
     if detail:
@@ -226,6 +228,23 @@ def _mysmsgate_accepted(status_code: int, parsed: dict | None) -> bool:
     if str(parsed.get("status", "")).lower() in ("failed", "error"):
         return False
     return True
+
+
+def _parse_optional_sim_slot(raw) -> int | None:
+    """
+    MySMSGate slot: 0 = SIM 1, 1 = SIM 2.
+    Empty / unset → None (let the gateway pick automatically).
+    """
+    text = str(raw if raw is not None else "").strip()
+    if text == "":
+        return None
+    try:
+        slot = int(text)
+    except (TypeError, ValueError):
+        return None
+    if slot in (0, 1):
+        return slot
+    return None
 
 
 def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
@@ -248,26 +267,35 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         "message": message[:1000],
     }
     device_id = (getattr(settings, "MYSMSGATE_DEVICE_ID", "") or "").strip()
-    sim_slot = getattr(settings, "MYSMSGATE_SIM_SLOT", None)
+    configured_slot = _parse_optional_sim_slot(
+        getattr(settings, "MYSMSGATE_SIM_SLOT", None)
+    )
 
-    attempts = []
+    # Try most specific first, then fall back to auto device / auto SIM.
+    # A wrong hard-coded SIM_SLOT=1 (SIM 2) is a common cause of total SMS failure
+    # on single-SIM phones.
+    attempts: list[dict] = []
+    if device_id and configured_slot is not None:
+        attempts.append({"device_id": device_id, "slot": configured_slot})
     if device_id:
         attempts.append({"device_id": device_id})
-    # Fallback: first online device on the account
-    attempts.append({})
+    if configured_slot is not None:
+        attempts.append({"slot": configured_slot})
+    attempts.append({})  # first online device, auto SIM
+
+    # De-dupe identical payloads while keeping order
+    seen = set()
+    unique_attempts = []
+    for extra in attempts:
+        key = tuple(sorted(extra.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_attempts.append(extra)
 
     last_error = "SMS send failed"
-    for extra in attempts:
+    for extra in unique_attempts:
         payload = {**base_payload, **extra}
-        if sim_slot is not None and str(sim_slot).strip() != "":
-            try:
-                slot = int(sim_slot)
-                # Docs use both names across versions
-                payload["slot"] = slot
-                payload["sim_slot"] = slot
-            except (TypeError, ValueError):
-                pass
-
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             endpoint,
@@ -290,10 +318,11 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
                         parsed = None
                 if _mysmsgate_accepted(resp.status, parsed):
                     logger.info(
-                        "MySMSGate accepted SMS to %s (HTTP %s, status=%s)",
+                        "MySMSGate accepted SMS to %s (HTTP %s, status=%s, opts=%s)",
                         to_phone,
                         resp.status,
                         (parsed or {}).get("status", "ok"),
+                        extra or "auto",
                     )
                     return True, ""
                 last_error = _mysmsgate_hint(
@@ -306,11 +335,17 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
             parsed_detail = _parse_mysmsgate_error(detail, detail)
             last_error = _mysmsgate_hint(exc.code, parsed_detail)
             logger.error(
-                "MySMSGate SMS failed to %s (%s): %s", to_phone, exc.code, detail
+                "MySMSGate SMS failed to %s (%s, opts=%s): %s",
+                to_phone,
+                exc.code,
+                extra or "auto",
+                detail,
             )
             continue
         except Exception as exc:  # noqa: BLE001
-            logger.exception("MySMSGate SMS failed to %s", to_phone)
+            logger.exception(
+                "MySMSGate SMS failed to %s (opts=%s)", to_phone, extra or "auto"
+            )
             last_error = str(exc)[:120]
             continue
 

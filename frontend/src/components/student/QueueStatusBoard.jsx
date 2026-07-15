@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import StatusPill from '../ui/StatusPill';
+import DayApprovalProgress from './DayApprovalProgress';
 import SecretCodeCard from './SecretCodeCard';
 import Alert from '../ui/Alert';
 
@@ -19,6 +20,7 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
     queue?.status !== 'waiting' &&
     queue?.position != null &&
     Number(queue.position) > 0;
+  const dayProgress = queue?.day_progress;
 
   if (!queue) return null;
 
@@ -26,8 +28,9 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
     setLocalError('');
     const ok = window.confirm(
       'Cannot attend this approval day?\n\n' +
-        'You will return to the waiting queue. You cannot choose a new date — ' +
-        'wait until the supervisor notifies the next schedule.'
+        'You will return to waiting nearer the front of the priority queue ' +
+        '(not the end). You cannot choose a new date — wait until the ' +
+        'supervisor notifies the next schedule.'
     );
     if (!ok) return;
     try {
@@ -100,6 +103,8 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
         </div>
       </div>
 
+      {dayProgress ? <DayApprovalProgress progress={dayProgress} /> : null}
+
       {!hasBatchNumber ? (
         <p className="queue-pending-note">
           Stay reachable by email and SMS. KabQue will notify you in arrival order.
@@ -122,8 +127,8 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
         {canDefer ? (
           <div className="queue-defer">
             <p className="queue-defer-copy">
-              Cannot make this approval day? Return to waiting — you cannot pick a
-              new date yourself.
+              Cannot make this approval day? Return to waiting nearer the front
+              of the priority queue — you cannot pick a new date yourself.
             </p>
             <button
               type="button"

@@ -1,44 +1,44 @@
 const CAMPUS_SHOTS = [
   {
-    src: '/kabale-teaching-facility.jpg',
-    alt: 'Teaching facilities at Kabale University',
-    label: 'Teaching facilities',
+    src: '/kabale-tour-leisure.jpg',
+    alt: 'Kabale University students travelling for a university tour and leisure trip',
+    label: 'Tour & leisure',
     span: 'tall',
   },
   {
-    src: '/brochure-img-1-73.png',
-    alt: 'Students and community life at Kabale University',
-    label: 'Campus community',
+    src: '/kabale-spark-hub-c.jpg',
+    alt: 'Official guests at the MTN Spark Hub launch, Kabale University',
+    label: 'Innovation launch',
     span: 'wide',
   },
   {
-    src: '/brochure-page-0.jpg',
-    alt: 'Kabale University campus grounds',
-    label: 'Kikungiri grounds',
+    src: '/kabale-spark-hub-building.jpg',
+    alt: 'Kabale MTN Spark Hub building exterior at Kikungiri Campus',
+    label: 'Spark Hub building',
     span: 'normal',
   },
   {
-    src: '/brochure-img-1-75.png',
-    alt: 'Academic life at Kabale University',
+    src: '/kabale-chancellor-installation.jpg',
+    alt: 'Installation of Kabale University chancellor at the main campus',
     label: 'Academic life',
     span: 'normal',
   },
   {
-    src: '/brochure-page-1.jpg',
-    alt: 'Kabale University brochure campus view',
-    label: 'University life',
+    src: '/kabale-sports.jpg',
+    alt: 'Kabale University football match from the campus sports gallery',
+    label: 'Sports',
     span: 'wide',
   },
   {
-    src: '/kabale-campus-building.png',
-    alt: 'Kabale University main campus building',
-    label: 'Main campus',
+    src: '/kabale-teaching-facility.jpg',
+    alt: 'Teaching facilities at Kabale University',
+    label: 'Teaching facilities',
     span: 'normal',
   },
 ];
 
 /**
- * University-style campus imagery — replaces the old feature/“Why KabQue” block.
+ * University-style campus imagery — every photo unique across the home page.
  */
 export default function HomeCampus() {
   return (
@@ -52,7 +52,7 @@ export default function HomeCampus() {
           <p className="home-kicker">Kabale University</p>
           <h2 id="campus-heading">Life at Kikungiri Campus</h2>
           <p className="home-lede">
-            From lecture halls to open grounds — the home of ordered fresher
+            From the MTN Spark Hub to open grounds — the home of ordered fresher
             intake for Kabale University.
           </p>
         </header>
@@ -60,7 +60,7 @@ export default function HomeCampus() {
         <div className="campus-mosaic" role="list">
           {CAMPUS_SHOTS.map((shot) => (
             <figure
-              key={shot.src + shot.label}
+              key={shot.src}
               className={`campus-tile campus-tile-${shot.span}`}
               role="listitem"
             >
@@ -68,8 +68,9 @@ export default function HomeCampus() {
                 src={shot.src}
                 alt={shot.alt}
                 loading="lazy"
-                width={800}
-                height={600}
+                decoding="async"
+                width={1600}
+                height={1067}
               />
               <figcaption>{shot.label}</figcaption>
             </figure>

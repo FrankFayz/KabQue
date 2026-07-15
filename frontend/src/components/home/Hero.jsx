@@ -8,6 +8,8 @@ export default function Hero() {
           src="/kabale-campus-building.png"
           alt=""
           className="cover-photo"
+          decoding="async"
+          fetchPriority="high"
         />
         <div className="cover-veil" />
         <div className="cover-grain" />

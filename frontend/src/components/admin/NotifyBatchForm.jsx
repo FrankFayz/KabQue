@@ -35,12 +35,6 @@ export default function NotifyBatchForm({
               ? `${waiting} waiting joiner${waiting === 1 ? '' : 's'}`
               : null}
           </span>
-          {waiting > 0 ? (
-            <p className="notify-join-hint">
-              New campus joiners land here as waiting. Notify a batch to give them
-              a day, queue numbers, and secret codes.
-            </p>
-          ) : null}
         </div>
 
         <label>
@@ -55,11 +49,6 @@ export default function NotifyBatchForm({
             disabled={busy}
           />
         </label>
-        <p className="hint">
-          Size N fills first with students still in a prior batch table (not yet
-          approved), then with waiting joiners in arrival order. Everyone gets
-          fresh queue numbers 1–N for that approval day — including carry-overs.
-        </p>
 
         {noneAvailable ? (
           <p className="notify-warn">

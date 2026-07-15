@@ -65,7 +65,7 @@ export default function PhoneInput({
           >
             {EAST_AFRICAN_COUNTRIES.map((c) => (
               <option key={c.iso} value={c.dial} title={`${c.name} (+${c.dial})`}>
-                {c.flag} {c.iso} +{c.dial}
+                {c.name} +{c.dial}
               </option>
             ))}
           </select>

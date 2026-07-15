@@ -18,8 +18,10 @@ services:
         value: https://mysmsgate.net/api/v1/send
       - key: MYSMSGATE_DEVICE_ID
         sync: false
+      # Optional. MySMSGate: 0 = SIM 1, 1 = SIM 2. Leave unset for auto.
+      # Do NOT hardcode "1" unless the gateway phone really uses SIM 2.
       - key: MYSMSGATE_SIM_SLOT
-        value: "1"
+        sync: false
       - key: BREVO_API_KEY
         sync: false
       - key: BREVO_SENDER_EMAIL

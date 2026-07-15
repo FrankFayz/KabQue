@@ -4,7 +4,8 @@ from django.conf import settings
 from .models import CampusSettings
 
 # Join is rejected if reported accuracy is weaker than this (metres).
-MAX_JOIN_ACCURACY_M = 80
+# Many phones in Uganda report 100–300m under cloud/urban cover; 80m was too strict.
+MAX_JOIN_ACCURACY_M = 500
 
 
 def campus_center_and_radius():
@@ -109,7 +110,7 @@ def validate_join_gps(
         for i, p1 in enumerate(points):
             for p2 in points[i + 1 :]:
                 max_spread = max(max_spread, geodesic(p1, p2).meters)
-        if max_spread > 55:
+        if max_spread > 150:
             raise ValueError(
                 "GPS readings jumped too far between samples. Stay still outdoors, "
                 "turn off fake-location apps, and try again."

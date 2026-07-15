@@ -91,14 +91,25 @@ class User(AbstractUser):
 
     @property
     def is_queue_admin(self) -> bool:
-        """Can operate the supervisor desk (Main Admin or approved verified supervisor)."""
-        if self.is_main_admin:
-            return True
+        """
+        Supervisor desk only: approved, email-verified staff.
+        Main Admin uses /main-admin APIs — not the desk.
+        Never grant via is_staff alone (blocks elevated students).
+        """
+        if self.is_main_admin or self.role == self.Role.MAIN_ADMIN:
+            return False
+        if self.role != self.Role.ADMIN:
+            return False
         if not self.is_approved:
             return False
         if not getattr(self, "email_verified", True):
             return False
-        return self.role == self.Role.ADMIN or self.is_staff
+        return True
+
+    @property
+    def is_student_user(self) -> bool:
+        """Fresher accounts only (never staff / Main Admin)."""
+        return self.role == self.Role.STUDENT and not self.is_main_admin
 
 
 class StudentProfile(models.Model):
@@ -338,6 +349,34 @@ class CampusSettings(models.Model):
 
     @classmethod
     def get_solo(cls) -> "CampusSettings":
+        from django.conf import settings
+
         cls.ensure_lifetime_columns()
         obj, _ = cls.objects.get_or_create(pk=1)
+
+        # Testing: keep geofence = whole Uganda so join works off Kikungiri.
+        if getattr(settings, "NATIONWIDE_GPS_TESTING", True):
+            name = getattr(settings, "CAMPUS_NAME", "Uganda (nationwide testing)")
+            lat = settings.CAMPUS_LATITUDE
+            lon = settings.CAMPUS_LONGITUDE
+            radius = int(settings.CAMPUS_RADIUS_METERS)
+            if (
+                (obj.name or "") != name
+                or float(obj.latitude) != float(lat)
+                or float(obj.longitude) != float(lon)
+                or int(obj.radius_meters or 0) != radius
+            ):
+                obj.name = name
+                obj.latitude = lat
+                obj.longitude = lon
+                obj.radius_meters = radius
+                obj.save(
+                    update_fields=[
+                        "name",
+                        "latitude",
+                        "longitude",
+                        "radius_meters",
+                        "updated_at",
+                    ]
+                )
         return obj

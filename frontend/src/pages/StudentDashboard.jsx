@@ -1,50 +1,29 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, getStoredUser, setAuth } from '../api';
-import { isMainAdmin } from '../authRoles';
 import CompleteProfileCard from '../components/student/CompleteProfileCard';
+import DeskOutcomeCard from '../components/student/DeskOutcomeCard';
 import JoinQueueCard from '../components/student/JoinQueueCard';
 import QueueStatusBoard from '../components/student/QueueStatusBoard';
 import Alert from '../components/ui/Alert';
 
-/** Same join-queue screen students use — shown when Main Admin opens Students. */
-function MainAdminStudentJoinView() {
-  const previewProfile = {
-    registration_number: 'STUDENT VIEW',
-    full_name: 'Fresher (preview)',
-    faculty: 'Sample faculty',
-    programme: 'Sample programme',
-    email: 'student@example.com',
-    phone: '',
-    profile_complete: true,
-  };
-
-  return (
-    <section className="dash student-dash">
-      <header className="student-welcome">
-        <div className="student-welcome-copy">
-          <p className="student-welcome-kicker">Student dashboard</p>
-          <h1>Join the queue</h1>
-          <p className="student-welcome-lede">
-            Preview of the fresher join screen used at Kikungiri Campus.
-          </p>
-        </div>
-        <div className="student-welcome-actions">
-          <Link to="/main-admin" className="btn btn-secondary">
-            Back to Main Admin
-          </Link>
-        </div>
-      </header>
-      <JoinQueueCard profile={previewProfile} />
-    </section>
-  );
+function deskOutcomeFrom(data, profile) {
+  const raw =
+    data?.desk_outcome ||
+    profile?.desk_outcome ||
+    data?.profile?.desk_outcome ||
+    '';
+  const o = String(raw).trim().toLowerCase();
+  return o === 'approved' || o === 'rejected' ? o : '';
 }
 
-function StudentDashboardLive() {
+function StudentDashboard() {
   const [user, setUser] = useState(() => getStoredUser());
   const [queue, setQueue] = useState(null);
   const [profile, setProfile] = useState(null);
   const [inQueue, setInQueue] = useState(false);
+  const [deskOutcome, setDeskOutcome] = useState(() =>
+    deskOutcomeFrom(getStoredUser())
+  );
   const [profileComplete, setProfileComplete] = useState(
     () => Boolean(getStoredUser()?.profile_complete)
   );
@@ -53,24 +32,34 @@ function StudentDashboardLive() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [showRejoinHint, setShowRejoinHint] = useState(false);
+  const [booted, setBooted] = useState(false);
+  const meLoaded = useRef(false);
 
   const applyQueuePayload = useCallback((data) => {
     const complete = Boolean(data?.profile_complete ?? data?.profile?.profile_complete);
     setProfileComplete(complete);
 
+    const nextProfile = data?.in_queue === false ? data.profile || null : data?.student || data?.profile || null;
+    const outcome = deskOutcomeFrom(data, nextProfile);
+
     if (data?.in_queue === false) {
       setInQueue(false);
       setQueue(null);
-      setProfile(data.profile || null);
+      setProfile(nextProfile);
+      setDeskOutcome(outcome);
+      if (outcome) setShowRejoinHint(false);
       return;
     }
     setInQueue(true);
     setQueue(data);
-    setProfile(data.student || null);
+    setProfile(nextProfile);
+    setDeskOutcome('');
+    setShowRejoinHint(false);
   }, []);
 
   const load = useCallback(
-    async ({ manual = false } = {}) => {
+    async ({ manual = false, includeMe = false } = {}) => {
       if (manual) {
         setRefreshing(true);
         setInfo('');
@@ -78,21 +67,35 @@ function StudentDashboardLive() {
       setError('');
 
       try {
-        const me = await api('/auth/me/');
-        if (me?.user) {
-          setUser(me.user);
-          setAuth({ user: me.user });
+        if (includeMe || !meLoaded.current) {
+          const me = await api('/auth/me/');
+          meLoaded.current = true;
+          if (me?.user) {
+            setUser(me.user);
+            setAuth({ user: me.user });
+            const seeded = deskOutcomeFrom(me.user, me.profile);
+            if (seeded) setDeskOutcome(seeded);
+          }
+          if (typeof me?.profile_complete === 'boolean') {
+            setProfileComplete(me.profile_complete);
+          }
+          if (me?.profile) {
+            setProfile(me.profile);
+            const meOutcome = deskOutcomeFrom(me, me.profile);
+            if (meOutcome) setDeskOutcome(meOutcome);
+          }
         }
-        if (typeof me?.profile_complete === 'boolean') {
-          setProfileComplete(me.profile_complete);
-        }
-        if (me?.profile) setProfile(me.profile);
 
         const data = await api(`/student/queue/?_=${Date.now()}`);
         applyQueuePayload(data);
         setLastRefreshed(new Date());
         if (manual) {
-          if (data?.in_queue) {
+          const outcome = deskOutcomeFrom(data, data?.profile);
+          if (outcome === 'approved') {
+            setInfo('Your documents were approved. Queue access is closed.');
+          } else if (outcome === 'rejected') {
+            setInfo('Your desk visit is complete. Queue access is closed.');
+          } else if (data?.in_queue) {
             const num =
               data.position != null && data.status !== 'waiting'
                 ? ` · queue #${data.position}`
@@ -108,6 +111,7 @@ function StudentDashboardLive() {
         setError(err.message || 'Could not refresh queue status.');
         setInfo('');
       } finally {
+        setBooted(true);
         if (manual) setRefreshing(false);
       }
     },
@@ -115,10 +119,22 @@ function StudentDashboardLive() {
   );
 
   useEffect(() => {
-    load({ manual: false });
-    const id = setInterval(() => load({ manual: false }), 30000);
-    return () => clearInterval(id);
-  }, [load]);
+    load({ manual: false, includeMe: true });
+    const tick = () => {
+      if (document.hidden) return;
+      load({ manual: false, includeMe: false });
+    };
+    const ms = queue?.day_progress ? 15000 : 45000;
+    const id = setInterval(tick, ms);
+    const onVis = () => {
+      if (!document.hidden) load({ manual: false, includeMe: false });
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [load, queue?.day_progress]);
 
   async function handleProfileSaved(data) {
     if (data?.user) {
@@ -128,11 +144,12 @@ function StudentDashboardLive() {
     if (data?.profile) setProfile(data.profile);
     setProfileComplete(true);
     setInfo(data?.message || 'Profile saved.');
-    await load({ manual: true });
+    meLoaded.current = true;
+    await load({ manual: true, includeMe: false });
   }
 
   async function handleJoined() {
-    await load({ manual: true });
+    await load({ manual: true, includeMe: false });
   }
 
   async function handleReschedule() {
@@ -148,7 +165,7 @@ function StudentDashboardLive() {
           'Returned to the waiting queue. Wait for the next supervisor schedule.'
       );
       if (data.queue) applyQueuePayload(data.queue);
-      else await load({ manual: true });
+      else await load({ manual: true, includeMe: false });
     } catch (err) {
       setError(err.message);
       throw err;
@@ -161,15 +178,17 @@ function StudentDashboardLive() {
     setActionBusy(true);
     setError('');
     try {
-      const data = await api('/student/leave-queue/', { method: 'POST' });
-      setInfo(data.message || 'You left the queue.');
-      setInQueue(false);
-      setQueue(null);
-      if (data.profile) setProfile(data.profile);
-      if (typeof data.profile_complete === 'boolean') {
-        setProfileComplete(data.profile_complete);
-      }
-      await load({ manual: true });
+      const data = await api('/student/leave-queue/', { method: 'POST', body: {} });
+      setInfo(
+        data.message ||
+          'You left the queue. You can rejoin on campus whenever you are ready.'
+      );
+      applyQueuePayload({
+        in_queue: false,
+        profile_complete: data.profile_complete ?? profileComplete,
+        profile: data.profile || profile,
+      });
+      if (data.can_rejoin !== false) setShowRejoinHint(true);
     } catch (err) {
       setError(err.message);
       throw err;
@@ -178,28 +197,29 @@ function StudentDashboardLive() {
     }
   }
 
-  const displayName =
-    user?.full_name ||
-    profile?.full_name ||
-    '';
-  const reg =
-    profile?.registration_number ||
-    user?.registration_number ||
-    '';
-  const stage = !profileComplete
-    ? 'Complete your profile'
-    : inQueue
-      ? 'Your queue status'
-      : 'Ready to join on campus';
+  function handleProfileUpdated(data) {
+    if (data?.user) {
+      setUser(data.user);
+      setAuth({ user: data.user });
+    }
+    if (data?.profile) setProfile(data.profile);
+  }
+
+  const name =
+    user?.full_name || user?.username || profile?.full_name || 'Student';
+  const reg = user?.registration_number || profile?.registration_number;
+  const finalized = Boolean(deskOutcome);
 
   return (
     <section className="dash student-dash">
       <header className="student-welcome">
         <div className="student-welcome-copy">
-          <p className="student-welcome-kicker">KabQue · Fresher queue</p>
-          <h1>{displayName ? `Hello, ${displayName}` : 'Student dashboard'}</h1>
+          <p className="student-welcome-kicker">Student</p>
+          <h1>Welcome, {name}</h1>
           <p className="student-welcome-lede">
-            {stage}
+            {finalized
+              ? 'Your KabQue desk visit is complete'
+              : 'Track your place in the KabQue fresher queue'}
             {reg ? (
               <>
                 {' · '}
@@ -217,7 +237,7 @@ function StudentDashboardLive() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => load({ manual: true })}
+            onClick={() => load({ manual: true, includeMe: false })}
             disabled={refreshing}
           >
             {refreshing ? 'Refreshing…' : 'Refresh'}
@@ -229,20 +249,26 @@ function StudentDashboardLive() {
       <Alert variant="info">{!error ? info : ''}</Alert>
 
       <div className="student-dash-body">
-        {inQueue ? (
+        {!booted ? (
+          <p className="muted student-boot">Loading your queue status…</p>
+        ) : inQueue ? (
           <QueueStatusBoard
             queue={queue}
             busy={actionBusy}
             onReschedule={handleReschedule}
             onLeave={handleLeaveQueue}
           />
+        ) : finalized ? (
+          <DeskOutcomeCard profile={profile} outcome={deskOutcome} />
         ) : !profileComplete ? (
           <CompleteProfileCard profile={profile} onSaved={handleProfileSaved} />
         ) : (
           <JoinQueueCard
             profile={profile}
             onJoined={handleJoined}
-            onProfileUpdated={handleProfileSaved}
+            onProfileUpdated={handleProfileUpdated}
+            joinDisabled={finalized}
+            showRejoinHint={showRejoinHint}
           />
         )}
       </div>
@@ -250,9 +276,4 @@ function StudentDashboardLive() {
   );
 }
 
-export default function StudentDashboard() {
-  if (isMainAdmin(getStoredUser())) {
-    return <MainAdminStudentJoinView />;
-  }
-  return <StudentDashboardLive />;
-}
+export default StudentDashboard;

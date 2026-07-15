@@ -11,7 +11,6 @@ export default function VerifyCodePanel({
   onSecretCodeChange,
   onVerify,
   onComplete,
-  onClear,
 }) {
   const entry = verified?.entry;
   const student = entry?.student;
@@ -20,8 +19,8 @@ export default function VerifyCodePanel({
     <Panel title="Confirm identity" className="verify-panel">
       <form onSubmit={onVerify} className="stack-form">
         <p className="muted">
-          Enter the secret code from the fresher’s email or SMS. A valid code checks them
-          in and shows their assigned day.
+          Enter the secret code from the fresher’s email or SMS. A valid code
+          confirms who they are and shows their assigned day.
         </p>
         <label>
           Secret code
@@ -97,15 +96,11 @@ export default function VerifyCodePanel({
             </div>
           </div>
 
-          {verified.newly_checked_in ? (
-            <p className="verify-chip ok">Checked in · dashboard count updated</p>
-          ) : (
-            <p className="verify-chip">Already checked in</p>
-          )}
-
           <p className="muted verify-auto-leave">
-            Approve or reject to finish — the student leaves the live queue automatically.
-            Use No-show to keep them in the queue.
+            <strong>Approve</strong> or <strong>Reject</strong> finishes the visit
+            and removes them from the live queue. <strong>Back to queue</strong>{' '}
+            clears today’s assignment and returns them nearer the front of waiting
+            — not the end — for the next notify.
           </p>
 
           <div className="cta-row">
@@ -128,13 +123,10 @@ export default function VerifyCodePanel({
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => onComplete('skipped')}
+              onClick={() => onComplete('back_to_queue')}
               disabled={busy}
             >
-              No-show
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={onClear} disabled={busy}>
-              Clear
+              Back to queue
             </button>
           </div>
         </div>

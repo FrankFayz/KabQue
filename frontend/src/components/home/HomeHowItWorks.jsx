@@ -51,13 +51,14 @@ export default function HomeHowItWorks() {
 
           <figure className="how-visual">
             <img
-              src="/kabale-teaching-facility.jpg"
-              alt="Kabale University teaching facility"
-              width={720}
-              height={900}
+              src="/kabale-spark-hub-a.jpg"
+              alt="MTN Spark Hub computer lab at Kabale University"
+              width={1600}
+              height={1067}
               loading="lazy"
+              decoding="async"
             />
-            <figcaption>Kikungiri Campus · ordered intake, one student at a time</figcaption>
+            <figcaption>Kikungiri Campus · MTN Spark Hub · ordered intake, one student at a time</figcaption>
           </figure>
         </div>
       </div>

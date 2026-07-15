@@ -6,11 +6,12 @@ import StatusPill from '../ui/StatusPill';
 function deliveryLabel(channel) {
   if (!channel) return null;
   if (channel.success) {
-    return { ok: true, text: `${channel.channel.toUpperCase()} delivered` };
+    return { ok: true, text: `${String(channel.channel || '').toUpperCase()} delivered` };
   }
-  const err = (channel.error || 'failed').trim();
-  const short = err.length > 48 ? `${err.slice(0, 46)}…` : err;
-  return { ok: false, text: `${channel.channel.toUpperCase()}: ${short}` };
+  return {
+    ok: false,
+    text: `${String(channel.channel || 'Message').toUpperCase()} could not be sent`,
+  };
 }
 
 function defaultTomorrow() {
@@ -129,8 +130,6 @@ export default function BatchResultTable({
   const isRescheduleResult = Boolean(result?.rescheduled);
   const smsFailed = Number(result?.sms_failed || 0) > 0;
   const emailFailed = Number(result?.emails_failed || 0) > 0;
-  const smsCode =
-    (Array.isArray(result?.sms_errors) && result.sms_errors[0]) || 'SMS send failed';
 
   // Keep the table open while the batch id is steady — only reset when a new batch arrives
   useEffect(() => {
@@ -265,7 +264,13 @@ export default function BatchResultTable({
       {emailFailed ? (
         <Alert>Email failed for {result.emails_failed} student(s).</Alert>
       ) : null}
-      {smsFailed ? <Alert>SMS failed ({result.sms_failed}): {smsCode}</Alert> : null}
+      {smsFailed ? (
+        <Alert>
+          SMS could not be delivered for {result.sms_failed} student
+          {result.sms_failed === 1 ? '' : 's'}. Email may still have gone through —
+          check contacts or try again later.
+        </Alert>
+      ) : null}
 
       <div className="batch-summary-grid">
         <div className="batch-stat">
