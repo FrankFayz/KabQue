@@ -80,10 +80,6 @@ export default function QueueTable({
         <div className="queue-opener-copy">
           <p className="queue-opener-kicker">Live queue</p>
           <h2>Browse students in order</h2>
-          <p>
-            First-come first-served by arrival time. Numbers appear only after a
-            batch is notified. Approve/reject then removes them automatically.
-          </p>
           <dl className="queue-opener-meta">
             <div>
               <dt>In this view</dt>

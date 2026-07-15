@@ -344,6 +344,8 @@ def batch_ids_for_entry(entry_id):
 
 
 def can_reschedule_entry(entry) -> bool:
+    if entry is None:
+        return False
     if entry.status in (
         QueueEntry.Status.APPROVED,
         QueueEntry.Status.REJECTED,
@@ -1312,11 +1314,7 @@ class StudentRescheduleView(APIView):
         payload["students_ahead_waiting"] = waiting_ahead_count(entry)
         return Response(
             {
-                "message": (
-                    "You have been returned to waiting nearer the front of the "
-                    "priority queue (not the end). You cannot choose a date — "
-                    "wait until the supervisor notifies the next schedule."
-                ),
+                "message": "Returned to waiting. Wait for the next supervisor schedule.",
                 "queue": payload,
             }
         )

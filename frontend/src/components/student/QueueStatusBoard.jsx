@@ -27,10 +27,7 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
   async function handleReturnToWaiting() {
     setLocalError('');
     const ok = window.confirm(
-      'Cannot attend this approval day?\n\n' +
-        'You will return to waiting nearer the front of the priority queue ' +
-        '(not the end). You cannot choose a new date — wait until the ' +
-        'supervisor notifies the next schedule.'
+      'Leave this approval day and return to waiting?\n\nYou will wait for the next schedule.'
     );
     if (!ok) return;
     try {
@@ -125,20 +122,14 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
       <div className="queue-manage">
         <Alert>{localError}</Alert>
         {canDefer ? (
-          <div className="queue-defer">
-            <p className="queue-defer-copy">
-              Cannot make this approval day? Return to waiting nearer the front
-              of the priority queue — you cannot pick a new date yourself.
-            </p>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleReturnToWaiting}
-              disabled={busy}
-            >
-              {busy ? 'Returning…' : 'Return to waiting queue'}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleReturnToWaiting}
+            disabled={busy}
+          >
+            {busy ? 'Returning…' : 'Return to waiting queue'}
+          </button>
         ) : null}
         {!['approved', 'rejected'].includes(queue.status) && (
           <button

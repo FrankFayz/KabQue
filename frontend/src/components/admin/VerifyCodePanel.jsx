@@ -97,10 +97,8 @@ export default function VerifyCodePanel({
           </div>
 
           <p className="muted verify-auto-leave">
-            <strong>Approve</strong> or <strong>Reject</strong> finishes the visit
-            and removes them from the live queue. <strong>Back to queue</strong>{' '}
-            clears today’s assignment and returns them nearer the front of waiting
-            — not the end — for the next notify.
+            Approve or Reject finishes the visit. Back to queue returns them to
+            waiting for a later schedule.
           </p>
 
           <div className="cta-row">

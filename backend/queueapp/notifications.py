@@ -34,13 +34,13 @@ def build_approval_message(
     date_str = scheduled_date.strftime("%A, %d %B %Y")
     return (
         f"Dear {full_name},\n\n"
-        f"KabQue — Kabale University document approval notice.\n\n"
+        f"Your Kabale University document-approval visit has been scheduled.\n\n"
+        f"Come on: {date_str}\n"
+        f"Your queue number: {position}\n"
         f"Registration number: {registration_number}\n"
-        f"Queue number for your approval day: {position}\n"
-        f"Please prepare and report for document approval on: {date_str}.\n\n"
-        f"Your SECRET CODE (show this to the admin): {secret_code}\n\n"
+        f"Secret code (show at the desk): {secret_code}\n\n"
         f"Bring all required documents. Do not share your secret code.\n\n"
-        f"— KabQue / Kabale University"
+        f"— KabQue · Kabale University"
     )
 
 
@@ -53,11 +53,12 @@ def build_approval_sms(
     position: int,
 ) -> str:
     date_str = scheduled_date.strftime("%d %b %Y")
-    first = (full_name or "student").strip().split()[0]
+    first = (full_name or "Student").strip().split()[0]
+    # Keep short and direct — one clear action + the 3 facts they need at the desk
     return (
-        f"KabQue: Hi {first}, report {date_str}. "
-        f"Reg {registration_number} #{position}. "
-        f"CODE: {secret_code}. Do not share. — KAB"
+        f"KabQue: {first}, come for document approval on {date_str}. "
+        f"Queue #{position}. Code {secret_code}. "
+        f"Bring your documents. Reg {registration_number}."
     )
 
 
