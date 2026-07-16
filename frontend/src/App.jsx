@@ -15,6 +15,7 @@ import StudentDashboard from './pages/StudentDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import MainAdminDashboard from './pages/MainAdminDashboard';
 import './App.css';
+import './responsive.css';
 
 /**
  * Strict role gates:

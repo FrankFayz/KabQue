@@ -91,7 +91,7 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
           )}
           <p className="student-status-hero-note">
             {hasBatchNumber
-              ? 'Present this number with your secret code at the approval desk.'
+              ? 'Bring your required documents and present this number with your secret code at the desk.'
               : 'You are in the priority queue. Your number is assigned when the next batch is notified.'}
           </p>
         </div>
@@ -117,7 +117,11 @@ export default function QueueStatusBoard({ queue, busy = false, onReschedule, on
         ))}
       </div>
 
-      <SecretCodeCard code={queue.secret_code} scheduledDate={queue.scheduled_date} />
+      <SecretCodeCard
+        code={queue.secret_code}
+        scheduledDate={queue.scheduled_date}
+        requiredDocuments={queue.required_documents}
+      />
 
       <div className="queue-manage">
         <Alert>{localError}</Alert>

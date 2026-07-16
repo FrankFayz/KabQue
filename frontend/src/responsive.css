@@ -1,0 +1,221 @@
+/* KabQue — extra mobile / tablet hardening (loaded after App.css) */
+
+.shell,
+.main,
+.dash,
+.panel,
+.panel-page,
+.student-dash,
+.desk-dash,
+.main-admin-page,
+.table-wrap,
+.queue-browser,
+.admin-grid,
+.status-board {
+  min-width: 0;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .nav-link,
+  .btn {
+    min-height: var(--touch-min);
+  }
+
+  input,
+  select,
+  textarea,
+  .btn {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 980px) {
+  .desk-dash,
+  .main-admin-page,
+  .student-dash {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .nav {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .admin-grid,
+  .analytics-grid,
+  .stat-row,
+  .desk-stat-row,
+  .main-admin-stats.stat-row {
+    grid-template-columns: 1fr;
+  }
+
+  .batch-opener,
+  .queue-opener {
+    grid-template-columns: 1fr;
+  }
+
+  .batch-opener-btn,
+  .batch-opener-reschedule,
+  .batch-browser-reschedule {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .dash-actions,
+  .desk-welcome-actions,
+  .student-welcome-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .dash-actions .btn,
+  .desk-welcome-actions .btn,
+  .student-welcome-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .desk-welcome,
+  .student-welcome,
+  .main-admin-page .dash-head {
+    align-items: stretch;
+  }
+
+  .panel,
+  .panel.join-queue-card,
+  .desk-dash .panel,
+  .admin-grid .panel,
+  .queue-browser.panel,
+  .panel.queue-browser {
+    width: 100%;
+    max-width: none;
+  }
+
+  .cta-row,
+  .queue-manage,
+  .join-contact-edit-actions,
+  .batch-reschedule-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+  }
+
+  .cta-row .btn,
+  .queue-manage .btn,
+  .batch-reschedule-actions .btn {
+    width: 100%;
+  }
+
+  .queue-row-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .queue-row-actions .queue-row-date,
+  .queue-row-actions .btn {
+    width: 100%;
+  }
+
+  .phone-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .main-admin-search input,
+  .filters input,
+  .filters select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .table-wrap,
+  .batch-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .main-admin-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+
+  .main-admin-tab {
+    flex: 1 0 auto;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .stat-row,
+  .desk-stat-row,
+  .main-admin-stats.stat-row {
+    grid-template-columns: 1fr;
+  }
+
+  .student-welcome,
+  .desk-welcome,
+  .main-admin-page .dash-head {
+    padding: 1rem;
+  }
+
+  .student-status-hero {
+    padding: 1.1rem 1rem;
+  }
+
+  .student-fact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-fact,
+  .student-fact:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .pos {
+    font-size: clamp(2.4rem, 12vw, 3rem);
+  }
+
+  .dash-refreshed {
+    white-space: normal;
+    width: 100%;
+  }
+
+  .batch-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .verify-result-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .batch-table-wrap table {
+    min-width: 36rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .topbar {
+    padding-inline: max(0.65rem, var(--safe-left)) max(0.65rem, var(--safe-right));
+  }
+
+  .nav-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .batch-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .secret-box,
+  .student-wait-note,
+  .panel,
+  .panel.join-queue-card {
+    padding: 1rem;
+  }
+}

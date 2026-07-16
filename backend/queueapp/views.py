@@ -16,6 +16,7 @@ from .notifications import (
     build_approval_sms,
     deliver_student_notification,
     normalize_notify_channel,
+    required_documents_payload,
     resolve_student_contacts,
 )
 from .auth_utils import (
@@ -1178,6 +1179,12 @@ class StudentQueueStatusView(APIView):
         payload["profile_complete"] = profile.is_profile_complete
         payload["students_ahead_waiting"] = ahead
         payload["has_batch_number"] = has_batch_queue_number(entry)
+        if has_batch_queue_number(entry) or entry.status in (
+            QueueEntry.Status.NOTIFIED,
+            QueueEntry.Status.CHECKED_IN,
+            QueueEntry.Status.SKIPPED,
+        ):
+            payload["required_documents"] = required_documents_payload()
         day_progress = build_student_day_progress(entry)
         if day_progress:
             payload["day_progress"] = day_progress

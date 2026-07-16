@@ -13,6 +13,8 @@ from .auth_utils import normalize_email
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "REQUIRED_DOCUMENTS",
+    "required_documents_payload",
     "build_approval_message",
     "build_approval_sms",
     "normalize_phone",
@@ -22,6 +24,21 @@ __all__ = [
     "send_email_notification",
     "send_sms_notification",
 ]
+
+# Documents students should bring to the KabQue approval desk.
+REQUIRED_DOCUMENTS = (
+    "Original admission letter",
+    "Original academic documents (result slips, certificates, or transcripts)",
+    "Identity card(s) from your previous school, college, or institution",
+    "National Council for Higher Education (NCHE) payment receipt",
+    "Original birth certificate",
+    "National ID (optional but relevant)",
+)
+
+
+def required_documents_payload() -> list[str]:
+    """Same checklist for email, SMS context, and the student dashboard."""
+    return list(REQUIRED_DOCUMENTS)
 
 
 def build_approval_message(
@@ -33,6 +50,7 @@ def build_approval_message(
     position: int,
 ) -> str:
     date_str = scheduled_date.strftime("%A, %d %B %Y")
+    docs = "\n".join(f"  {i}. {item}" for i, item in enumerate(REQUIRED_DOCUMENTS, start=1))
     return (
         f"Dear {full_name},\n\n"
         f"Your Kabale University document-approval visit has been scheduled.\n\n"
@@ -40,7 +58,9 @@ def build_approval_message(
         f"Your queue number: {position}\n"
         f"Registration number: {registration_number}\n"
         f"Secret code (show at the desk): {secret_code}\n\n"
-        f"Bring all required documents. Do not share your secret code.\n\n"
+        f"Bring these documents (originals):\n"
+        f"{docs}\n\n"
+        f"Do not share your secret code.\n\n"
         f"— KabQue · Kabale University"
     )
 
@@ -55,11 +75,13 @@ def build_approval_sms(
 ) -> str:
     date_str = scheduled_date.strftime("%d %b %Y")
     first = (full_name or "Student").strip().split()[0]
-    # Keep short and direct — one clear action + the 3 facts they need at the desk
+    # Compact but concrete — full list is in email + KabQue dashboard
     return (
-        f"KabQue: {first}, come for document approval on {date_str}. "
+        f"KabQue: {first}, document approval on {date_str}. "
         f"Queue #{position}. Code {secret_code}. "
-        f"Bring your documents. Reg {registration_number}."
+        f"Bring originals: admission letter, academic docs, previous school ID, "
+        f"NCHE receipt, birth certificate; National ID if available. "
+        f"Reg {registration_number}."
     )
 
 
