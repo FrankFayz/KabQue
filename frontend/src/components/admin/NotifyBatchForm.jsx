@@ -1,6 +1,10 @@
 import Panel from '../ui/Panel';
 import Alert from '../ui/Alert';
 
+/**
+ * “Available to schedule” = unscheduled students still in the live queue
+ * (status waiting). Batch leftovers are separate — they are not this count.
+ */
 export default function NotifyBatchForm({
   batchSize,
   scheduledDate,
@@ -15,25 +19,22 @@ export default function NotifyBatchForm({
   onChannelChange,
   onSubmit,
 }) {
-  const waiting = Number(remaining) || 0;
+  const unscheduled = Number(remaining) || 0;
   const carry = Number(leftovers) || 0;
-  const pool = waiting + carry;
   const requested = Number(batchSize) || 0;
-  const overRequest = pool > 0 && requested > pool;
-  const noneAvailable = pool === 0;
+  const canNotify = unscheduled > 0 || carry > 0;
+  const overRequest = unscheduled > 0 && requested > unscheduled;
 
   return (
     <Panel title="Notify next batch">
       <form onSubmit={onSubmit} className="stack-form">
-        <div className={`notify-remaining-banner${pool > 0 ? ' has-pool' : ''}`}>
+        <div
+          className={`notify-remaining-banner${unscheduled > 0 ? ' has-pool' : ''}`}
+        >
           <span className="label">Available to schedule</span>
-          <strong>{pool}</strong>
+          <strong>{unscheduled}</strong>
           <span className="notify-pool-breakdown">
-            {carry > 0 ? `${carry} still in batch table` : null}
-            {carry > 0 && waiting > 0 ? ' · ' : null}
-            {waiting > 0 || carry === 0
-              ? `${waiting} waiting joiner${waiting === 1 ? '' : 's'}`
-              : null}
+            Unscheduled in queue (no approval day yet)
           </span>
         </div>
 
@@ -50,22 +51,23 @@ export default function NotifyBatchForm({
           />
         </label>
 
-        {noneAvailable ? (
+        {!canNotify ? (
           <p className="notify-warn">
-            Nothing to notify. Waiting queue is empty and no unapproved students
-            remain in a batch table.
+            Nothing to notify. No unscheduled students in the queue.
           </p>
         ) : null}
-        {!noneAvailable && waiting === 0 && carry > 0 ? (
+        {canNotify && unscheduled === 0 && carry > 0 ? (
           <p className="notify-warn notify-warn-info">
-            No new waiting joiners — the next batch will include the {carry}{' '}
-            student{carry === 1 ? '' : 's'} still in a batch table.
+            No unscheduled joiners right now. Notify will use {carry} student
+            {carry === 1 ? '' : 's'} still left in a batch table.
           </p>
         ) : null}
         {overRequest ? (
           <p className="notify-warn">
-            Only {pool} student{pool === 1 ? '' : 's'} available. The system
-            will notify all {pool} (carry-overs first, then waiting).
+            Only {unscheduled} unscheduled student
+            {unscheduled === 1 ? '' : 's'} in the queue. The system will take
+            what is available
+            {carry > 0 ? ` (plus ${carry} from a batch table)` : ''}.
           </p>
         ) : null}
 
@@ -97,7 +99,7 @@ export default function NotifyBatchForm({
         <Alert>{error}</Alert>
         <Alert variant="info">{!error ? message : ''}</Alert>
 
-        <button className="btn btn-primary" disabled={busy || noneAvailable}>
+        <button className="btn btn-primary" disabled={busy || !canNotify}>
           {busy ? 'Sending…' : 'Send notifications'}
         </button>
       </form>

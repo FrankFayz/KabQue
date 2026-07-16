@@ -1,34 +1,27 @@
 export default function AdminStats({ counts = {} }) {
-  const items = [
-    {
-      label: 'In queue',
-      value: counts.total,
-      hint: 'Live on the desk list now',
-      tone: '',
-    },
-    {
-      label: 'Notified',
-      value: counts.notified,
-      hint: 'Has a day + queue number',
-      tone: '',
-    },
-    {
-      label: 'Approved',
-      value: counts.approved,
-      hint: 'All-time desk approvals',
-      tone: '',
-    },
-  ];
+  const inQueue =
+    counts.in_queue ?? counts.unscheduled ?? counts.waiting ?? counts.total ?? 0;
+  const scheduled = counts.scheduled ?? 0;
 
   return (
-    <div className="stat-row desk-stat-row">
-      {items.map((item) => (
-        <div key={item.label} className={`stat ${item.tone}`.trim()}>
-          <span className="label">{item.label}</span>
-          <strong>{item.value ?? 0}</strong>
-          <span className="stat-hint">{item.hint}</span>
-        </div>
-      ))}
+    <div className="stat-row desk-stat-row" aria-label="Desk counts">
+      <div className="stat desk-stat desk-stat-queue">
+        <span className="label">In queue</span>
+        <strong>{inQueue}</strong>
+        <span className="stat-hint">Joined · not scheduled</span>
+      </div>
+
+      <div className="stat desk-stat desk-stat-scheduled">
+        <span className="label">Scheduled</span>
+        <strong>{scheduled}</strong>
+        <span className="stat-hint">Has an approval day</span>
+      </div>
+
+      <div className="stat desk-stat desk-stat-approved">
+        <span className="label">Approved</span>
+        <strong>{counts.approved ?? 0}</strong>
+        <span className="stat-hint">All-time desk finishes</span>
+      </div>
     </div>
   );
 }

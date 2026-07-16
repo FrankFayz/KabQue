@@ -28,6 +28,8 @@ export default function AdminDashboard() {
   const [queueMessage, setQueueMessage] = useState('');
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
+  /** Which desk button is in flight: 'approved' | 'rejected' | 'back_to_queue' | null */
+  const [completeBusy, setCompleteBusy] = useState(null);
   const [queueBusy, setQueueBusy] = useState(false);
   const [rescheduleBusy, setRescheduleBusy] = useState(false);
   const [rescheduleError, setRescheduleError] = useState('');
@@ -46,9 +48,12 @@ export default function AdminDashboard() {
   searchRef.current = searchApplied;
   notifyResultRef.current = notifyResult;
 
-  const waitingCount = dash?.counts?.remaining ?? dash?.counts?.waiting ?? 0;
+  const waitingCount =
+    dash?.counts?.unscheduled ??
+    dash?.counts?.waiting ??
+    dash?.counts?.remaining ??
+    0;
   const leftoversCount = dash?.counts?.batch_leftovers ?? 0;
-  const schedulePool = waitingCount + leftoversCount;
   const liveBatchOpen = Boolean(
     notifyResult?.batch?.id || (notifyResult?.students || []).length > 0
   );
@@ -77,7 +82,7 @@ export default function AdminDashboard() {
     });
   }, []);
 
-  const load = useCallback(async ({ manual = false } = {}) => {
+  const load = useCallback(async ({ manual = false, lite = false } = {}) => {
     const seq = ++loadSeq.current;
     if (manual) {
       setRefreshing(true);
@@ -99,15 +104,32 @@ export default function AdminDashboard() {
         ? `?batch_id=${batchId}&_=${stamp}`
         : `?_=${stamp}`;
 
+      // Background polls skip faculty/programme analytics (faster).
+      const dashUrl =
+        lite && !manual
+          ? `/admin/dashboard/?lite=1&_=${stamp}`
+          : `/admin/dashboard/?_=${stamp}`;
+
       const [d, q, batchData] = await Promise.all([
-        api(`/admin/dashboard/?_=${stamp}`),
+        api(dashUrl),
         api(`/admin/queue/?${queueParams.toString()}`),
         api(`/admin/batch/active/${batchQs}`).catch(() => null),
       ]);
 
       if (seq !== loadSeq.current) return;
 
-      setDash(d);
+      setDash((prev) => {
+        if (!d) return prev;
+        // Lite responses omit analytics — keep previous breakdown if present.
+        if (lite && !manual && prev?.by_faculty && !d.by_faculty) {
+          return {
+            ...prev,
+            counts: d.counts ?? prev.counts,
+            campus: d.campus ?? prev.campus,
+          };
+        }
+        return d;
+      });
       setQueue(Array.isArray(q) ? q : []);
       if (batchData) applyBatchPayload(batchData);
       setLastSynced(new Date());
@@ -123,9 +145,14 @@ export default function AdminDashboard() {
       });
       setPageError('');
       if (manual) {
-        const waiting = d?.counts?.waiting ?? d?.counts?.remaining ?? 0;
-        const total = d?.counts?.total ?? (Array.isArray(q) ? q.length : 0);
-        setRefreshNote(`Updated · ${total} in queue · ${waiting} waiting`);
+        const waiting =
+          d?.counts?.in_queue ??
+          d?.counts?.unscheduled ??
+          d?.counts?.waiting ??
+          d?.counts?.remaining ??
+          0;
+        const total = d?.counts?.total ?? waiting;
+        setRefreshNote(`Updated · ${total} in queue`);
       }
     } catch (err) {
       if (seq !== loadSeq.current) return;
@@ -138,6 +165,10 @@ export default function AdminDashboard() {
     }
   }, [applyBatchPayload]);
 
+  /** Soft sync — never blocks button busy state. */
+  function softRefresh() {
+    load({ manual: false, lite: true }).catch(() => {});
+  }
   useEffect(() => {
     load({ manual: false });
   }, [status, searchApplied, load]);
@@ -145,11 +176,11 @@ export default function AdminDashboard() {
   useEffect(() => {
     const tick = () => {
       if (document.hidden) return;
-      load({ manual: false });
+      load({ manual: false, lite: true });
     };
     const id = setInterval(tick, 30000);
     const onVis = () => {
-      if (!document.hidden) load({ manual: false });
+      if (!document.hidden) load({ manual: false, lite: true });
     };
     document.addEventListener('visibilitychange', onVis);
     return () => {
@@ -174,7 +205,12 @@ export default function AdminDashboard() {
       });
       setNotifyResult(data);
       const mode = data.channel || channel;
-      if (data.sms_failed && (mode === 'sms' || mode === 'both')) {
+      if (data.delivery_pending) {
+        setNotifyMessage(
+          data.message ||
+            `Batch ready (${mode}) · notified ${data.notified_count}. Sending email/SMS in the background.`
+        );
+      } else if (data.sms_failed && (mode === 'sms' || mode === 'both')) {
         const reason = Array.isArray(data.sms_errors) && data.sms_errors.length
           ? ` Reason: ${data.sms_errors[0]}`
           : !data.sms_configured
@@ -198,7 +234,24 @@ export default function AdminDashboard() {
           `Only ${data.available} waiting (you asked for ${data.requested}); all remaining were notified.`
         );
       }
-      await load({ manual: false });
+      if (data.remaining != null) {
+        setDash((prev) => {
+          if (!prev?.counts) return prev;
+          const waiting = data.remaining;
+          return {
+            ...prev,
+            counts: {
+              ...prev.counts,
+              waiting,
+              in_queue: waiting,
+              unscheduled: waiting,
+              remaining: waiting,
+              total: waiting,
+            },
+          };
+        });
+      }
+      softRefresh();
       requestAnimationFrame(() => {
         batchZoneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
@@ -225,7 +278,24 @@ export default function AdminDashboard() {
       if (data.counts) {
         setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
       }
-      await load({ manual: false });
+      // Reflect check-in in the live batch table immediately
+      const entryId = data?.entry?.id;
+      if (entryId && data?.entry?.status) {
+        setNotifyResult((prev) => {
+          if (!prev?.students?.length) return prev;
+          const next = {
+            ...prev,
+            students: prev.students.map((s) =>
+              s.queue_entry_id === entryId
+                ? { ...s, status: data.entry.status }
+                : s
+            ),
+          };
+          notifyResultRef.current = next;
+          return next;
+        });
+      }
+      softRefresh();
     } catch (err) {
       setVerifyError(err.message || 'Invalid or already-used secret code.');
       setVerified(null);
@@ -236,24 +306,32 @@ export default function AdminDashboard() {
   }
 
   async function complete(decision) {
-    if (!verified?.entry?.id) return;
-    setVerifyBusy(true);
+    if (!verified?.entry?.id || completeBusy) return;
+    const entryId = verified.entry.id;
+    setCompleteBusy(decision);
     setVerifyError('');
     try {
       const data = await api('/admin/complete-verification/', {
         method: 'POST',
         body: {
-          queue_entry_id: verified.entry.id,
+          queue_entry_id: entryId,
           decision,
           notes: '',
         },
       });
       setVerifyMessage(data.message || `Marked as ${decision}.`);
+
+      // 1) Stats + Available to schedule update immediately
       if (data.counts) {
-        setDash((prev) => (prev ? { ...prev, counts: data.counts } : { counts: data.counts }));
+        setDash((prev) =>
+          prev ? { ...prev, counts: data.counts } : { counts: data.counts }
+        );
       }
-      if (data.batch) {
+
+      // 2) Batch result table — drop the student / replace with server payload
+      if (data.batch?.batch) {
         setNotifyResult(data.batch);
+        notifyResultRef.current = data.batch;
       } else if (data.removed_queue_entry_id) {
         setNotifyResult((prev) => {
           if (!prev?.students?.length) return prev;
@@ -263,23 +341,42 @@ export default function AdminDashboard() {
           const remainNote =
             decision === 'back_to_queue'
               ? `Returned to waiting nearer the front — ${nextStudents.length} remain in today’s batch.`
-              : `Student ${decision}. Removed from batch table — ${nextStudents.length} remain.`;
-          return {
+              : decision === 'rejected'
+                ? `Deleted from batch table — ${nextStudents.length} remain.`
+                : `Student approved. Removed from batch table — ${nextStudents.length} remain.`;
+          const next = {
             ...prev,
             students: nextStudents,
             notified_count: nextStudents.length,
             remaining_in_batch: nextStudents.length,
             message: remainNote,
           };
+          notifyResultRef.current = next;
+          return next;
         });
       }
+
+      // 3) Live queue table
+      if (decision === 'back_to_queue' && data.entry) {
+        setQueue((prev) => {
+          const without = prev.filter((row) => row.id !== entryId);
+          // Default list is waiting-only — show them again after return
+          if (!status || status === 'waiting') {
+            return [data.entry, ...without];
+          }
+          return without;
+        });
+      } else {
+        setQueue((prev) => prev.filter((row) => row.id !== entryId));
+      }
+
       setVerified(null);
       setSecretCode('');
-      await load({ manual: false });
+      softRefresh();
     } catch (err) {
       setVerifyError(err.message || 'Could not complete verification.');
     } finally {
-      setVerifyBusy(false);
+      setCompleteBusy(null);
     }
   }
 
@@ -287,6 +384,7 @@ export default function AdminDashboard() {
     setQueueBusy(true);
     setQueueError('');
     setQueueMessage('');
+    setRescheduleError('');
     try {
       const data = await api('/admin/reschedule/', {
         method: 'POST',
@@ -297,9 +395,15 @@ export default function AdminDashboard() {
         },
       });
       setQueueMessage(data.message || 'Rescheduled.');
-      await load({ manual: false });
+      setRescheduleMessage(data.message || 'Student rescheduled.');
+      if (data.batch) {
+        setNotifyResult(data.batch);
+        notifyResultRef.current = data.batch;
+      }
+      softRefresh();
     } catch (err) {
       setQueueError(err.message);
+      setRescheduleError(err.message || 'Could not reschedule this student.');
     } finally {
       setQueueBusy(false);
     }
@@ -320,8 +424,26 @@ export default function AdminDashboard() {
         },
       });
       setNotifyResult(data);
+      notifyResultRef.current = data;
       setRescheduleMessage(data.message || 'Batch rescheduled.');
-      await load({ manual: false });
+      if (data.remaining != null) {
+        setDash((prev) => {
+          if (!prev?.counts) return prev;
+          const waiting = data.remaining;
+          return {
+            ...prev,
+            counts: {
+              ...prev.counts,
+              waiting,
+              in_queue: waiting,
+              unscheduled: waiting,
+              remaining: waiting,
+              total: waiting,
+            },
+          };
+        });
+      }
+      softRefresh();
       return true;
     } catch (err) {
       setRescheduleError(err.message || 'Could not reschedule this batch.');
@@ -332,14 +454,14 @@ export default function AdminDashboard() {
   }
 
   const stageHint =
-    schedulePool > 0
-      ? `${schedulePool} ready to schedule`
+    waitingCount > 0
+      ? `${waitingCount} unscheduled in queue`
       : liveBatchOpen
         ? 'Batch open · verify codes'
         : 'Waiting for campus joiners';
 
   return (
-    <section className="dash desk-dash">
+    <section className="dash desk-dash kabque-ops">
       <header className="desk-welcome">
         <div className="desk-welcome-copy">
           <p className="desk-welcome-kicker">Kabale University · Supervisor</p>
@@ -348,7 +470,8 @@ export default function AdminDashboard() {
         </div>
         <div className="desk-welcome-actions">
           {lastSynced ? (
-            <span className="dash-refreshed">
+            <span className="dash-refreshed desk-live-pill">
+              <span className="desk-live-dot" aria-hidden="true" />
               {refreshing ? 'Refreshing…' : `Live · ${lastSynced.toLocaleTimeString()}`}
             </span>
           ) : null}
@@ -375,7 +498,7 @@ export default function AdminDashboard() {
       <section className="desk-zone" aria-labelledby="desk-ops-heading">
         <header className="desk-zone-head">
           <div>
-            <p className="desk-zone-kicker">Desk operations</p>
+            <p className="desk-zone-kicker">Operations</p>
             <h2 id="desk-ops-heading">Schedule & verify</h2>
           </div>
         </header>
@@ -398,6 +521,7 @@ export default function AdminDashboard() {
             secretCode={secretCode}
             verified={verified}
             busy={verifyBusy}
+            completeBusy={completeBusy}
             error={verifyError}
             message={verifyMessage}
             onSecretCodeChange={(value) => {
@@ -417,24 +541,26 @@ export default function AdminDashboard() {
       >
         <header className="desk-zone-head">
           <div>
-            <p className="desk-zone-kicker">Today’s list</p>
-            <h2 id="desk-batch-heading">Batch result table</h2>
+            <p className="desk-zone-kicker">Today</p>
+            <h2 id="desk-batch-heading">Batch results</h2>
           </div>
         </header>
         <BatchResultTable
           result={notifyResult}
           onBatchReschedule={batchReschedule}
+          onStudentReschedule={rescheduleEntry}
           rescheduleBusy={rescheduleBusy}
           rescheduleError={rescheduleError}
           rescheduleMessage={rescheduleMessage}
+          studentRescheduleBusy={queueBusy}
         />
       </section>
 
       <section className="desk-zone" aria-labelledby="desk-queue-heading">
         <header className="desk-zone-head">
           <div>
-            <p className="desk-zone-kicker">Lookup</p>
-            <h2 id="desk-queue-heading">Live queue</h2>
+            <p className="desk-zone-kicker">Queue</p>
+            <h2 id="desk-queue-heading">Waiting students</h2>
           </div>
         </header>
         <QueueTable

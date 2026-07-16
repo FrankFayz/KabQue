@@ -162,7 +162,8 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "KabQue <noreply@kabale.ac.
 
 
 def _clean_env(value: str) -> str:
-    text = (value or "").strip()
+    """Strip whitespace, BOM, and wrapping quotes from env values."""
+    text = (value or "").strip().lstrip("\ufeff").strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
         text = text[1:-1].strip()
     return text

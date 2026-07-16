@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import Alert from '../components/ui/Alert';
-import PageHeader from '../components/ui/PageHeader';
 import StatusPill from '../components/ui/StatusPill';
-
-const TABS = [
-  { id: 'freshers', label: 'Freshers' },
-  { id: 'admins', label: 'Admins' },
-  { id: 'supervisors', label: 'Supervisors' },
-];
 
 function statusLabel(status) {
   const map = {
@@ -55,7 +48,7 @@ function AccountActions({ row, busy, onLock, onDelete, extra }) {
         onClick={() => onDelete(row)}
         title="Permanently delete this account and related data"
       >
-        Delete
+        {busy ? 'Deleting…' : 'Delete'}
       </button>
     </div>
   );
@@ -196,38 +189,47 @@ export default function MainAdminDashboard() {
           : 'supervisor';
     const ok = window.confirm(
       kind === 'Main Admin'
-        ? `Permanently delete Main Admin ${label}?\n\n` +
-            'Their account is removed from KabQue. Notification batches they created stay in the system (creator cleared). You cannot delete the last Main Admin or your own account.'
-        : `Permanently delete ${kind} ${label}?\n\n` +
-            'This removes the account and related queue data from the database. This cannot be undone.'
+        ? `Delete Main Admin ${label} permanently?\n\nThis cannot be undone.`
+        : `Delete ${kind} ${label} permanently?\n\nThis removes the account and related queue data. This cannot be undone.`
     );
     if (!ok) return;
 
-    const confirmText = window.prompt(
-      `Type DELETE to permanently remove ${label}:`
-    );
-    if (confirmText !== 'DELETE') {
-      setError('Deletion cancelled — you must type DELETE to confirm.');
-      return;
-    }
+    const deletedId = row.id;
+    const snapshot = rows;
+    const snapshotTotal = total;
+    const snapshotTotals = totals;
 
-    setActionBusy(row.id);
+    // Remove from the table immediately — do not wait for a full refetch.
+    setRows((prev) => prev.filter((r) => r.id !== deletedId));
+    setTotal((n) => Math.max(0, (n || 0) - 1));
+    setTotals((prev) => {
+      if (!prev) return prev;
+      const key =
+        tab === 'freshers' ? 'freshers' : tab === 'admins' ? 'admins' : 'supervisors';
+      return { ...prev, [key]: Math.max(0, (prev[key] || 0) - 1) };
+    });
+    setActionBusy(deletedId);
     setMessage('');
     setError('');
+
     try {
       const data = await api('/main-admin/delete-user/', {
         method: 'POST',
-        body: { user_id: row.id },
+        body: { user_id: deletedId },
       });
       const counts = data.counts || {};
       const countHint =
         kind === 'student' && counts.total != null
-          ? ` Desk now: In queue ${counts.total ?? 0}, Notified ${counts.notified ?? 0}, Approved (all-time) ${counts.approved ?? 0}.`
+          ? ` Desk now: In queue ${counts.in_queue ?? counts.total ?? 0}, Scheduled ${counts.scheduled ?? 0}, Approved (all-time) ${counts.approved ?? 0}.`
           : '';
       setMessage((data.message || 'Account permanently deleted.') + countHint);
-      await loadTab({ manual: false });
+      // Soft refresh totals/overview in the background — row already gone.
+      loadTab({ manual: false }).catch(() => {});
     } catch (err) {
-      setError(err.message);
+      setRows(snapshot);
+      setTotal(snapshotTotal);
+      setTotals(snapshotTotals);
+      setError(err.message || 'Could not delete this account. Try again.');
     } finally {
       setActionBusy(null);
     }
@@ -241,42 +243,48 @@ export default function MainAdminDashboard() {
         : totals?.supervisors ?? total;
 
   const colSpan =
-    tab === 'freshers' ? 7 : tab === 'admins' ? 6 : 5;
+    tab === 'freshers' ? 8 : tab === 'admins' ? 6 : 5;
 
   return (
-    <div className="panel-page main-admin-page">
-      <PageHeader
-        eyebrow="Kabale University"
-        title="Main Admin"
-        action={
-          <div className="dash-actions">
-            {lastSynced ? (
-              <span className="dash-refreshed">
-                {busy ? 'Refreshing…' : `Updated · ${lastSynced.toLocaleTimeString()}`}
-              </span>
-            ) : null}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => loadTab({ manual: true })}
-              disabled={busy}
-              aria-busy={busy}
-            >
-              {busy ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
-        }
-      />
+    <div className="panel-page main-admin-page kabque-ops">
+      <header className="desk-welcome main-admin-welcome">
+        <div className="desk-welcome-copy">
+          <p className="desk-welcome-kicker">Kabale University · Control</p>
+          <h1>Main Admin</h1>
+          <p className="desk-welcome-lede">
+            Directory, access, and supervisor approval — one clean control surface.
+          </p>
+        </div>
+        <div className="desk-welcome-actions">
+          {lastSynced ? (
+            <span className="dash-refreshed desk-live-pill">
+              <span className="desk-live-dot" aria-hidden="true" />
+              {busy ? 'Refreshing…' : `Updated · ${lastSynced.toLocaleTimeString()}`}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => loadTab({ manual: true })}
+            disabled={busy}
+            aria-busy={busy}
+          >
+            {busy ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      </header>
 
       <Alert>{error}</Alert>
       {message || refreshNote ? (
         <Alert variant="info">{message || refreshNote}</Alert>
       ) : null}
 
-      <div className="stat-row main-admin-stats">
+      <div className="stat-row main-admin-stats" role="tablist" aria-label="Directories">
         <button
           type="button"
-          className={`stat${tab === 'freshers' ? ' stat-active' : ''}`}
+          role="tab"
+          aria-selected={tab === 'freshers'}
+          className={`stat desk-stat${tab === 'freshers' ? ' stat-active' : ''}`}
           onClick={() => setTab('freshers')}
         >
           <span className="label">Freshers</span>
@@ -285,16 +293,20 @@ export default function MainAdminDashboard() {
         </button>
         <button
           type="button"
-          className={`stat${tab === 'admins' ? ' stat-active' : ''}`}
+          role="tab"
+          aria-selected={tab === 'admins'}
+          className={`stat desk-stat${tab === 'admins' ? ' stat-active' : ''}`}
           onClick={() => setTab('admins')}
         >
           <span className="label">Admins</span>
           <strong>{totals?.admins ?? 0}</strong>
-          <span className="stat-hint">Main Admin accounts</span>
+          <span className="stat-hint">System operators</span>
         </button>
         <button
           type="button"
-          className={`stat${tab === 'supervisors' ? ' stat-active' : ''}`}
+          role="tab"
+          aria-selected={tab === 'supervisors'}
+          className={`stat desk-stat${tab === 'supervisors' ? ' stat-active' : ''}`}
           onClick={() => setTab('supervisors')}
         >
           <span className="label">Supervisors</span>
@@ -302,36 +314,22 @@ export default function MainAdminDashboard() {
           <span className="stat-hint">
             {totals?.supervisors_pending
               ? `${totals.supervisors_pending} pending approval`
-              : 'Kabale staff desk'}
+              : 'Desk staff'}
           </span>
         </button>
       </div>
 
       <div className="panel queue-browser main-admin-panel">
-        <div className="main-admin-tabs" role="tablist" aria-label="Directory">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              className={`main-admin-tab${tab === t.id ? ' is-active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="table-tools">
+        <div className="main-admin-panel-head">
           <div>
+            <p className="desk-zone-kicker">Directory</p>
             <h2>
               {tab === 'freshers' && 'All freshers'}
               {tab === 'admins' && 'All admins'}
               {tab === 'supervisors' && 'All supervisors'}
             </h2>
             <p className="main-admin-count">
-              Total: <strong>{totalForTab}</strong>
+              <strong>{totalForTab}</strong> records
               {busy ? ' · Loading…' : ''}
             </p>
           </div>
@@ -356,6 +354,7 @@ export default function MainAdminDashboard() {
                   <th>Name</th>
                   <th>Faculty</th>
                   <th>Programme</th>
+                  <th>Secret code</th>
                   <th>Verification</th>
                   <th>Access</th>
                   <th>Actions</th>
@@ -399,6 +398,13 @@ export default function MainAdminDashboard() {
                     </td>
                     <td>{row.faculty || '—'}</td>
                     <td>{row.programme || '—'}</td>
+                    <td>
+                      {row.secret_code ? (
+                        <code className="main-admin-code">{row.secret_code}</code>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td>
                       <StatusPill status={row.verification_status}>
                         {statusLabel(row.verification_status)}

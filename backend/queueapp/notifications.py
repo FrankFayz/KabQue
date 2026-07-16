@@ -1,13 +1,14 @@
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 
 from django.conf import settings
 from django.core.mail import send_mail
 
-from .phones import normalize_phone
+from .phones import normalize_phone, validate_east_africa_phone
 from .auth_utils import normalize_email
 
 logger = logging.getLogger(__name__)
@@ -274,8 +275,8 @@ def _parse_optional_sim_slot(raw) -> int | None:
     return None
 
 
-def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, int, str]:
-    """POST JSON to MySMSGate. Returns (ok, status_code, error_or_empty)."""
+def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, int, str, dict | None]:
+    """POST JSON to MySMSGate. Returns (ok, status_code, error_or_empty, parsed)."""
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         endpoint,
@@ -298,17 +299,19 @@ def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, i
                     parsed = None
             if _mysmsgate_accepted(resp.status, parsed):
                 logger.info(
-                    "MySMSGate accepted SMS to %s (HTTP %s, status=%s, keys=%s)",
-                    payload.get("to") or payload.get("number"),
+                    "MySMSGate accepted SMS to %s (HTTP %s, status=%s, slot=%s, sms_id=%s)",
+                    payload.get("to"),
                     resp.status,
                     (parsed or {}).get("status", "ok"),
-                    sorted(k for k in payload if k not in ("to", "number", "message")),
+                    payload.get("slot"),
+                    (parsed or {}).get("sms_id") or (parsed or {}).get("id"),
                 )
-                return True, resp.status, ""
+                return True, resp.status, "", parsed if isinstance(parsed, dict) else None
             return (
                 False,
                 resp.status,
                 _mysmsgate_hint(resp.status, _parse_mysmsgate_error(raw or "")),
+                parsed if isinstance(parsed, dict) else None,
             )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -318,13 +321,55 @@ def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, i
             sorted(payload.keys()),
             detail,
         )
-        return False, exc.code, _mysmsgate_hint(exc.code, _parse_mysmsgate_error(detail, detail))
+        return (
+            False,
+            exc.code,
+            _mysmsgate_hint(exc.code, _parse_mysmsgate_error(detail, detail)),
+            None,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("MySMSGate SMS network error")
-        return False, 0, str(exc)[:160]
+        return False, 0, str(exc)[:160], None
+
+
+def _mysmsgate_poll_status(api_key: str, sms_id) -> str:
+    """Return latest provider status string for an SMS id (best-effort)."""
+    if sms_id in (None, ""):
+        return ""
+    url = f"https://mysmsgate.net/api/v1/sms?id={sms_id}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            parsed = json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    return str(
+        parsed.get("status")
+        or parsed.get("state")
+        or (parsed.get("sms") or {}).get("status")
+        or ""
+    ).strip().lower()
 
 
 def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
+    """
+    Send one SMS via MySMSGate TO the student phone only.
+
+    Your Android phone is only the *sender* (gateway). The recipient must be the
+    student's registered number. If texts land in *your* inbox as received, that
+    usually means the profile phone is actually one of your own SIMs (self-SMS
+    on a dual-SIM phone) — not that KabQue rewrote the destination.
+    """
     api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
     if not api_key:
         return False, (
@@ -332,7 +377,12 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
             "(e.g. on Render Environment)"
         )
 
-    if not to_phone.startswith("+"):
+    # MySMSGate requires international format: +CC… (e.g. +2567XXXXXXXX).
+    try:
+        recipient = validate_east_africa_phone(to_phone)
+    except ValueError as exc:
+        return False, str(exc)
+    if not recipient.startswith("+"):
         return False, f"Phone must start with country code (+…), got: {to_phone}"
 
     endpoint = (
@@ -345,29 +395,25 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     )
     text = message[:1000]
 
-    # Official shape first: {to, message}. Then device. Slot last (and only if set).
-    # Never force SIM 2 — empty SIM slot = auto.
-    attempts: list[dict] = [
-        {"to": to_phone, "message": text},
-    ]
-    if device_id:
-        attempts.append({"to": to_phone, "message": text, "device_id": device_id})
-    if configured_slot is not None:
-        attempts.append({"to": to_phone, "message": text, "slot": configured_slot})
-        if device_id:
-            attempts.append(
-                {
-                    "to": to_phone,
-                    "message": text,
-                    "device_id": device_id,
-                    "slot": configured_slot,
-                }
-            )
+    # This gateway phone reports default_sim_slot=1 (SIM 2). Auto/empty then
+    # uses SIM 2, which often queues locally but never reaches students.
+    # Prefer SIM 1 (slot 0) unless the operator explicitly sets a slot.
+    preferred_slot = 0 if configured_slot is None else configured_slot
+    fallback_slot = 1 if preferred_slot == 0 else 0
 
-    # De-dupe
+    def _payload(slot: int) -> dict:
+        # Official MySMSGate shape: to must be E.164 with country code.
+        body = {"to": recipient, "message": text, "slot": slot}
+        if device_id:
+            body["device_id"] = device_id
+        return body
+
+    attempts = [_payload(preferred_slot), _payload(fallback_slot)]
     seen = set()
     unique: list[dict] = []
     for payload in attempts:
+        if payload.get("to") != recipient:
+            continue
         key = tuple(sorted((k, str(v)) for k, v in payload.items()))
         if key in seen:
             continue
@@ -376,27 +422,76 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
 
     last_error = "SMS send failed"
     for payload in unique:
-        ok, _code, err = _mysmsgate_post(endpoint, api_key, payload)
-        if ok:
-            return True, ""
-        if err:
-            last_error = err
+        ok, _code, err, parsed = _mysmsgate_post(endpoint, api_key, payload)
+        if not ok:
+            if err:
+                last_error = err
+            continue
+
+        sms_id = None
+        if isinstance(parsed, dict):
+            sms_id = parsed.get("sms_id") or parsed.get("id")
+
+        # Brief poll — catch carrier/SIM failures that still returned HTTP 202.
+        final_status = ""
+        if sms_id not in (None, ""):
+            for _ in range(3):
+                time.sleep(1.2)
+                final_status = _mysmsgate_poll_status(api_key, sms_id)
+                if final_status in ("failed", "error", "sent", "delivered", "sending"):
+                    break
+
+        if final_status in ("failed", "error"):
+            last_error = (
+                f"MySMSGate marked SMS failed on SIM {int(payload.get('slot', 0)) + 1}. "
+                "Put airtime on the SIM that should send, set MYSMSGATE_SIM_SLOT to that "
+                "SIM (0 = SIM 1, 1 = SIM 2), and keep the app online."
+            )
+            logger.warning(
+                "MySMSGate SMS to %s failed after accept (sms_id=%s, status=%s, slot=%s)",
+                recipient,
+                sms_id,
+                final_status,
+                payload.get("slot"),
+            )
+            continue
+
+        logger.info(
+            "MySMSGate SMS to student %s ok (sms_id=%s, status=%s, slot=%s)",
+            recipient,
+            sms_id,
+            final_status or (parsed or {}).get("status"),
+            payload.get("slot"),
+        )
+        return True, ""
 
     if "offline" not in last_error.lower() and "api key" not in last_error.lower():
         last_error = (
             f"{last_error}. Keep the MySMSGate Android app open and online, "
-            "then try SMS again."
+            "use SIM 1 for SMS (MYSMSGATE_SIM_SLOT=0), and confirm each student "
+            "phone is THEIR number — not the gateway phone."
         )
     return False, last_error
 
 
 def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
-    """Send SMS via MySMSGate to the student's profile phone (E.164 +country)."""
-    to_phone = normalize_phone(phone)
-    if not to_phone:
+    """
+    Send SMS via MySMSGate to the student's profile phone.
+
+    Always normalizes to E.164 with country code (+256… / +254… / etc.) before
+    calling the gateway — MySMSGate rejects bare local numbers.
+    """
+    raw = (phone or "").strip()
+    if not raw:
         return False, "No phone on student profile"
-    if not to_phone.startswith("+"):
-        return False, "Student phone needs country code (+256…)"
+    try:
+        to_phone = validate_east_africa_phone(raw)
+    except ValueError as exc:
+        # Last chance: normalize local 07… → +256… then re-validate
+        try:
+            to_phone = validate_east_africa_phone(normalize_phone(raw))
+        except ValueError:
+            return False, str(exc)
 
     if (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip():
         return _send_via_mysmsgate(to_phone, body)
@@ -436,10 +531,17 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
 def resolve_student_contacts(user) -> tuple[str, str]:
     """
     Email + phone the fresher saved on their profile (post-signup).
-    Always read the latest values from the user record.
+    Phone is always returned in E.164 with country code when valid
+    (MySMSGate needs +CC…, e.g. +2567XXXXXXXX).
     """
     email = normalize_email(getattr(user, "email", "") or "")
-    phone = normalize_phone(getattr(user, "phone", "") or "")
+    raw_phone = getattr(user, "phone", "") or ""
+    try:
+        phone = validate_east_africa_phone(raw_phone) if raw_phone.strip() else ""
+    except ValueError:
+        phone = normalize_phone(raw_phone)
+        if phone and not phone.startswith("+"):
+            phone = ""
     return email, phone
 
 

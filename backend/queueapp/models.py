@@ -201,26 +201,71 @@ class QueueEntry(models.Model):
         """Allow NULL batch numbers if migrate has not yet altered the column."""
         if cls._position_null_ready:
             return
-        from django.db import connection
+        from django.db import connection, transaction
 
         table = cls._meta.db_table
         try:
             with connection.cursor() as cursor:
                 if connection.vendor == "postgresql":
                     cursor.execute(
-                        f"ALTER TABLE {table} ALTER COLUMN position DROP NOT NULL"
+                        """
+                        SELECT is_nullable
+                        FROM information_schema.columns
+                        WHERE table_schema = current_schema()
+                          AND table_name = %s
+                          AND column_name = 'position'
+                        """,
+                        [table],
                     )
+                    row = cursor.fetchone()
+                    if row and row[0] == "YES":
+                        cls._position_null_ready = True
+                        return
+                    # DDL inside a poisoned catch kills the whole request TX —
+                    # wrap ALTER in a savepoint, or skip when already atomic.
+                    if connection.in_atomic_block:
+                        sid = transaction.savepoint()
+                        try:
+                            cursor.execute(
+                                f"ALTER TABLE {table} ALTER COLUMN position DROP NOT NULL"
+                            )
+                            transaction.savepoint_commit(sid)
+                        except Exception:
+                            transaction.savepoint_rollback(sid)
+                    else:
+                        cursor.execute(
+                            f"ALTER TABLE {table} ALTER COLUMN position DROP NOT NULL"
+                        )
                 elif connection.vendor == "sqlite":
                     # SQLite cannot easily DROP NOT NULL; migrate handles new DBs.
                     pass
             cls._position_null_ready = True
         except Exception:
-            # Column may already be nullable / table missing during migrate
             cls._position_null_ready = True
 
     def assign_secret_code(self) -> str:
-        self.secret_code = generate_secret_code()
-        return self.secret_code
+        """
+        Give this entry a fresh code that no other queue entry is using, so a
+        code can never point to two students (no collisions / mimics).
+        """
+        manager = type(self).objects
+        for _ in range(50):
+            code = generate_secret_code()
+            clash = manager.filter(secret_code__iexact=code)
+            if self.pk:
+                clash = clash.exclude(pk=self.pk)
+            if not clash.exists():
+                self.secret_code = code
+                return self.secret_code
+        # Extremely unlikely fallback: widen the code until it is unique.
+        while True:
+            code = generate_secret_code(12)
+            clash = manager.filter(secret_code__iexact=code)
+            if self.pk:
+                clash = clash.exclude(pk=self.pk)
+            if not clash.exists():
+                self.secret_code = code
+                return self.secret_code
 
 
 class NotificationBatch(models.Model):
@@ -269,15 +314,41 @@ class NotificationLog(models.Model):
         """Allow clearing queue_entry when a fresher leaves after approve/reject."""
         if cls._queue_entry_null_ready:
             return
-        from django.db import connection
+        from django.db import connection, transaction
 
         table = cls._meta.db_table
         try:
             with connection.cursor() as cursor:
                 if connection.vendor == "postgresql":
                     cursor.execute(
-                        f"ALTER TABLE {table} ALTER COLUMN queue_entry_id DROP NOT NULL"
+                        """
+                        SELECT is_nullable
+                        FROM information_schema.columns
+                        WHERE table_schema = current_schema()
+                          AND table_name = %s
+                          AND column_name = 'queue_entry_id'
+                        """,
+                        [table],
                     )
+                    row = cursor.fetchone()
+                    if row and row[0] == "YES":
+                        cls._queue_entry_null_ready = True
+                        return
+                    if connection.in_atomic_block:
+                        sid = transaction.savepoint()
+                        try:
+                            cursor.execute(
+                                f"ALTER TABLE {table} "
+                                "ALTER COLUMN queue_entry_id DROP NOT NULL"
+                            )
+                            transaction.savepoint_commit(sid)
+                        except Exception:
+                            transaction.savepoint_rollback(sid)
+                    else:
+                        cursor.execute(
+                            f"ALTER TABLE {table} "
+                            "ALTER COLUMN queue_entry_id DROP NOT NULL"
+                        )
             cls._queue_entry_null_ready = True
         except Exception:
             cls._queue_entry_null_ready = True
@@ -312,23 +383,54 @@ class CampusSettings(models.Model):
         """
         Add lifetime_* columns if a deploy raced ahead of migrate.
         Safe to call repeatedly (PostgreSQL IF NOT EXISTS / SQLite pragma).
+        Never poisons an open request transaction if ALTER fails.
         """
         if cls._lifetime_ready:
             return
-        from django.db import connection
+        from django.db import connection, transaction
 
         table = cls._meta.db_table
+
+        def _pg_has(cursor, col):
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = %s AND column_name = %s
+                """,
+                [table, col],
+            )
+            return cursor.fetchone() is not None
+
+        def _run_alter(cursor, sql):
+            if connection.in_atomic_block:
+                sid = transaction.savepoint()
+                try:
+                    cursor.execute(sql)
+                    transaction.savepoint_commit(sid)
+                except Exception:
+                    transaction.savepoint_rollback(sid)
+                    raise
+            else:
+                cursor.execute(sql)
+
         try:
             with connection.cursor() as cursor:
                 if connection.vendor == "postgresql":
-                    cursor.execute(
-                        f"ALTER TABLE {table} "
-                        "ADD COLUMN IF NOT EXISTS lifetime_approved integer DEFAULT 0 NOT NULL"
-                    )
-                    cursor.execute(
-                        f"ALTER TABLE {table} "
-                        "ADD COLUMN IF NOT EXISTS lifetime_rejected integer DEFAULT 0 NOT NULL"
-                    )
+                    if not _pg_has(cursor, "lifetime_approved"):
+                        _run_alter(
+                            cursor,
+                            f"ALTER TABLE {table} "
+                            "ADD COLUMN IF NOT EXISTS lifetime_approved "
+                            "integer DEFAULT 0 NOT NULL",
+                        )
+                    if not _pg_has(cursor, "lifetime_rejected"):
+                        _run_alter(
+                            cursor,
+                            f"ALTER TABLE {table} "
+                            "ADD COLUMN IF NOT EXISTS lifetime_rejected "
+                            "integer DEFAULT 0 NOT NULL",
+                        )
                 elif connection.vendor == "sqlite":
                     cursor.execute(f"PRAGMA table_info({table})")
                     cols = {row[1] for row in cursor.fetchall()}

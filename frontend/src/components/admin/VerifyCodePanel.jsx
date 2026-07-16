@@ -6,6 +6,7 @@ export default function VerifyCodePanel({
   secretCode,
   verified,
   busy,
+  completeBusy = null,
   error,
   message,
   onSecretCodeChange,
@@ -14,6 +15,7 @@ export default function VerifyCodePanel({
 }) {
   const entry = verified?.entry;
   const student = entry?.student;
+  const deskLocked = Boolean(busy || completeBusy);
 
   return (
     <Panel title="Confirm identity" className="verify-panel">
@@ -97,8 +99,8 @@ export default function VerifyCodePanel({
           </div>
 
           <p className="muted verify-auto-leave">
-            Approve or Reject finishes the visit. Back to queue returns them to
-            waiting for a later schedule.
+            Approve finishes the visit. Delete removes them from today’s queue.
+            Back to queue returns them to waiting for a later schedule.
           </p>
 
           <div className="cta-row">
@@ -106,25 +108,39 @@ export default function VerifyCodePanel({
               type="button"
               className="btn btn-primary"
               onClick={() => onComplete('approved')}
-              disabled={busy}
+              disabled={deskLocked || !verified?.schedule_is_today}
+              aria-busy={completeBusy === 'approved'}
+              title={
+                verified?.schedule_is_today
+                  ? 'Accept documents and clear them from today’s queue'
+                  : 'Only students scheduled for today can be approved'
+              }
             >
-              Approve
+              {completeBusy === 'approved' ? 'Approving…' : 'Approve'}
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-danger-outline"
               onClick={() => onComplete('rejected')}
-              disabled={busy}
+              disabled={deskLocked || !verified?.schedule_is_today}
+              aria-busy={completeBusy === 'rejected'}
+              title={
+                verified?.schedule_is_today
+                  ? 'Remove this fresher from today’s queue (documents not accepted)'
+                  : 'Only students scheduled for today can be deleted'
+              }
             >
-              Reject
+              {completeBusy === 'rejected' ? 'Deleting…' : 'Delete'}
             </button>
             <button
               type="button"
               className="btn btn-ghost"
               onClick={() => onComplete('back_to_queue')}
-              disabled={busy}
+              disabled={deskLocked}
+              aria-busy={completeBusy === 'back_to_queue'}
+              title="Return them to the waiting queue for a later schedule"
             >
-              Back to queue
+              {completeBusy === 'back_to_queue' ? 'Returning…' : 'Back to queue'}
             </button>
           </div>
         </div>

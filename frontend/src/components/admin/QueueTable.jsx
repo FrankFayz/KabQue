@@ -5,11 +5,11 @@ import StatusPill from '../ui/StatusPill';
 const PAGE_SIZE = 10;
 
 const STATUS_OPTIONS = [
-  '',
-  'waiting',
-  'notified',
-  'checked_in',
-  'skipped',
+  { value: '', label: 'In queue (unscheduled)' },
+  { value: 'notified', label: 'Scheduled · notified' },
+  { value: 'checked_in', label: 'Scheduled · checked in' },
+  { value: 'skipped', label: 'Scheduled · skipped' },
+  { value: 'all', label: 'All live entries' },
 ];
 
 function tomorrowISO() {
@@ -79,7 +79,7 @@ export default function QueueTable({
       <section className="queue-opener">
         <div className="queue-opener-copy">
           <p className="queue-opener-kicker">Live queue</p>
-          <h2>Browse students in order</h2>
+          <h2>Unscheduled students</h2>
           <dl className="queue-opener-meta">
             <div>
               <dt>In this view</dt>
@@ -102,12 +102,13 @@ export default function QueueTable({
     <Panel className="queue-browser">
       <div className="queue-browser-head">
         <div>
-          <p className="queue-browser-kicker">Queue order</p>
+          <p className="queue-browser-kicker">Waiting queue</p>
           <h2>
             Students {from}–{to}
           </h2>
           <p className="muted">
-            {ordered.length} student{ordered.length === 1 ? '' : 's'} · page{' '}
+            {ordered.length} unscheduled student
+            {ordered.length === 1 ? '' : 's'} · page{' '}
             {ordered.length ? safePage + 1 : 0} of {ordered.length ? totalPages : 0}
           </p>
         </div>
@@ -120,8 +121,8 @@ export default function QueueTable({
         <div className="filters queue-browser-filters">
           <select value={status} onChange={(e) => onStatusChange(e.target.value)}>
             {STATUS_OPTIONS.map((s) => (
-              <option key={s || 'all'} value={s}>
-                {s ? s.replaceAll('_', ' ') : 'All statuses'}
+              <option key={s.value || 'queue'} value={s.value}>
+                {s.label}
               </option>
             ))}
           </select>

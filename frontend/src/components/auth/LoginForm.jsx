@@ -93,7 +93,6 @@ export default function LoginForm() {
   if (forgotMode) {
     return (
       <div className="auth-form">
-        <p className="auth-form-eyebrow">KabQue</p>
         <ForgotPasswordPanel
           initialIdentifier={identifier}
           onBack={() => setForgotMode(false)}
@@ -106,13 +105,15 @@ export default function LoginForm() {
     const needsApproval = verifyVariant !== 'main_admin';
     return (
       <div className="auth-form">
-        <p className="auth-form-eyebrow">KabQue</p>
-        <h1>Email confirmed</h1>
-        <p className="auth-form-lead">
-          {needsApproval
-            ? 'Your email is verified. Wait for approval before signing in.'
-            : 'Your email is verified. Sign in to continue.'}
-        </p>
+        <header className="auth-form-head">
+          <p className="auth-form-eyebrow">KabQue</p>
+          <h1>Email confirmed</h1>
+          <p className="auth-form-lead">
+            {needsApproval
+              ? 'Your email is verified. Wait for approval before signing in.'
+              : 'Your email is verified. Sign in to continue.'}
+          </p>
+        </header>
         <button
           type="button"
           className="btn btn-primary auth-submit"
@@ -131,7 +132,9 @@ export default function LoginForm() {
   if (verifyEmail) {
     return (
       <div className="auth-form">
-        <p className="auth-form-eyebrow">KabQue</p>
+        <header className="auth-form-head">
+          <p className="auth-form-eyebrow">KabQue</p>
+        </header>
         <SupervisorEmailVerifyPanel
           email={verifyEmail}
           initialMessage={verifyMessage}
@@ -156,11 +159,13 @@ export default function LoginForm() {
 
   return (
     <form className="auth-form" onSubmit={onSubmit} noValidate>
-      <p className="auth-form-eyebrow">KabQue</p>
-      <h1>Sign in</h1>
-      <p className="auth-form-lead">
-        Freshers: use your registration number and password.
-      </p>
+      <header className="auth-form-head">
+        <p className="auth-form-eyebrow">Welcome back</p>
+        <h1>Sign in</h1>
+        <p className="auth-form-lead">
+          Freshers use their registration number and password.
+        </p>
+      </header>
 
       <Alert>{error}</Alert>
       {info ? <Alert variant="info">{info}</Alert> : null}

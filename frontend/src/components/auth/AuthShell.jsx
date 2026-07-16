@@ -7,32 +7,32 @@ export default function AuthShell() {
   const onRegister = pathname.includes('register');
 
   return (
-    <div className="auth-shell">
+    <div className="auth-shell kabque-auth">
       <header className="auth-top">
         <Link to="/" className="auth-wordmark" aria-label="KabQue home">
           <img
             className="auth-wordmark-badge"
             src="/kabale-badge.png"
-            alt="Kabale University badge"
-            width={44}
-            height={44}
+            alt=""
+            width={40}
+            height={40}
           />
           <span className="auth-wordmark-text">
             <span className="auth-wordmark-name">KabQue</span>
-            <span className="auth-wordmark-sub">Kabale University queue</span>
+            <span className="auth-wordmark-sub">Kabale University</span>
           </span>
         </Link>
         <nav className="auth-top-nav" aria-label="Account">
           <Link
             to="/login"
-            className={`btn btn-header-signin${onLogin ? ' is-active' : ''}`}
+            className={`auth-nav-link${onLogin ? ' is-active' : ''}`}
             aria-current={onLogin ? 'page' : undefined}
           >
             Sign in
           </Link>
           <Link
             to="/register"
-            className={`btn btn-header-create${onRegister ? ' is-active' : ''}`}
+            className={`auth-nav-link auth-nav-link-primary${onRegister ? ' is-active' : ''}`}
             aria-current={onRegister ? 'page' : undefined}
           >
             Create account
@@ -52,14 +52,12 @@ export default function AuthShell() {
           <img
             src="/kabale-badge.png"
             alt=""
-            width={32}
-            height={32}
+            width={28}
+            height={28}
             className="auth-footer-badge"
           />
           <div className="auth-footer-copy">
-            <p className="auth-footer-brand">
-              KabQue · Kabale University · Knowledge is the Future
-            </p>
+            <p className="auth-footer-brand">KabQue · Knowledge is the Future</p>
             <p className="auth-footer-meta">
               Kikungiri Campus ·{' '}
               <Link to="/">Home</Link>

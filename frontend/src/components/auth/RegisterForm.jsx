@@ -123,13 +123,15 @@ export default function RegisterForm() {
     const needsApproval = verifyVariant !== 'main_admin';
     return (
       <div className="auth-form">
-        <p className="auth-form-eyebrow">KabQue</p>
-        <h1>Email confirmed</h1>
-        <p className="auth-form-lead">
-          {needsApproval
-            ? 'Your email is verified. Your account still needs approval before you can sign in.'
-            : 'Your email is verified. You can sign in now.'}
-        </p>
+        <header className="auth-form-head">
+          <p className="auth-form-eyebrow">KabQue</p>
+          <h1>Email confirmed</h1>
+          <p className="auth-form-lead">
+            {needsApproval
+              ? 'Your email is verified. Your account still needs approval before you can sign in.'
+              : 'Your email is verified. You can sign in now.'}
+          </p>
+        </header>
         <Link to="/login" className="btn btn-primary auth-submit">
           Continue to sign in
         </Link>
@@ -140,7 +142,9 @@ export default function RegisterForm() {
   if (verifyEmail) {
     return (
       <div className="auth-form">
-        <p className="auth-form-eyebrow">KabQue</p>
+        <header className="auth-form-head">
+          <p className="auth-form-eyebrow">KabQue</p>
+        </header>
         <SupervisorEmailVerifyPanel
           email={verifyEmail}
           initialMessage={verifyMessage}
@@ -156,11 +160,13 @@ export default function RegisterForm() {
 
   return (
     <form className="auth-form" onSubmit={onSubmit} noValidate>
-      <p className="auth-form-eyebrow">KabQue</p>
-      <h1>Create account</h1>
-      <p className="auth-form-lead">
-        Freshers: use the registration number on your admission letter.
-      </p>
+      <header className="auth-form-head">
+        <p className="auth-form-eyebrow">Join the queue</p>
+        <h1>Create account</h1>
+        <p className="auth-form-lead">
+          Use the registration number on your admission letter.
+        </p>
+      </header>
 
       <Alert>{error}</Alert>
       {info ? <Alert variant="info">{info}</Alert> : null}
