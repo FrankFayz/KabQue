@@ -86,6 +86,7 @@ export default function NotifyBatchForm({
             value={channel}
             onChange={(e) => onChannelChange(e.target.value)}
             disabled={busy}
+            aria-label="Notification channel"
           >
             <option value="both">Email & SMS</option>
             <option value="email">Email only</option>

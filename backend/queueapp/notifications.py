@@ -16,6 +16,7 @@ __all__ = [
     "build_approval_message",
     "build_approval_sms",
     "normalize_phone",
+    "normalize_notify_channel",
     "resolve_student_contacts",
     "deliver_student_notification",
     "send_email_notification",
@@ -420,6 +421,24 @@ def resolve_student_contacts(user) -> tuple[str, str]:
     return email, phone
 
 
+def normalize_notify_channel(channel: str) -> str:
+    """Supervisor pick → exact send mode: email | sms | both."""
+    raw = (channel or "both").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "email": "email",
+        "email_only": "email",
+        "mail": "email",
+        "sms": "sms",
+        "sms_only": "sms",
+        "text": "sms",
+        "both": "both",
+        "email_sms": "both",
+        "email_and_sms": "both",
+        "all": "both",
+    }
+    return aliases.get(raw, "both")
+
+
 def deliver_student_notification(
     *,
     user,
@@ -429,20 +448,22 @@ def deliver_student_notification(
     sms_body: str,
 ) -> list[dict]:
     """
-    Send notice to the student's saved email and/or phone, according to the
-    supervisor channel choice: email | sms | both.
+    Send exactly what the supervisor chose:
+      email → email only
+      sms   → SMS only
+      both  → email and SMS
+    Never cross-sends the other channel.
     """
-    # Fresh contact details (profile completed / updated after signup)
     try:
         user.refresh_from_db(fields=["email", "phone"])
     except Exception:  # noqa: BLE001
         pass
 
     email, phone = resolve_student_contacts(user)
-    channel = (channel or "both").strip().lower()
+    mode = normalize_notify_channel(channel)
     results: list[dict] = []
 
-    if channel in ("email", "both"):
+    if mode in ("email", "both"):
         if email:
             ok, err = send_email_notification(email, subject, email_body)
             results.append(
@@ -467,7 +488,7 @@ def deliver_student_notification(
                 }
             )
 
-    if channel in ("sms", "both"):
+    if mode in ("sms", "both"):
         if phone:
             ok, err = send_sms_notification(phone, sms_body)
             results.append(

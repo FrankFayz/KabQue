@@ -128,8 +128,12 @@ export default function BatchResultTable({
     students[0]?.scheduled_date ||
     '—';
   const isRescheduleResult = Boolean(result?.rescheduled);
-  const smsFailed = Number(result?.sms_failed || 0) > 0;
-  const emailFailed = Number(result?.emails_failed || 0) > 0;
+  const mode = result?.channel || 'both';
+  const smsFailed =
+    Number(result?.sms_failed || 0) > 0 && (mode === 'sms' || mode === 'both');
+  const emailFailed =
+    Number(result?.emails_failed || 0) > 0 &&
+    (mode === 'email' || mode === 'both');
 
   // Keep the table open while the batch id is steady — only reset when a new batch arrives
   useEffect(() => {

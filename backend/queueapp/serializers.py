@@ -411,6 +411,9 @@ class CompleteVerificationSerializer(serializers.Serializer):
 class RescheduleSerializer(serializers.Serializer):
     scheduled_date = serializers.DateField()
     queue_entry_id = serializers.IntegerField(required=False)
+    channel = serializers.ChoiceField(
+        choices=["email", "sms", "both"], default="both", required=False
+    )
 
     def validate_scheduled_date(self, value):
         today = timezone.localdate()

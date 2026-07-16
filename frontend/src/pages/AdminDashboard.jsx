@@ -173,19 +173,25 @@ export default function AdminDashboard() {
         },
       });
       setNotifyResult(data);
-      if (data.sms_failed) {
+      const mode = data.channel || channel;
+      if (data.sms_failed && (mode === 'sms' || mode === 'both')) {
         const reason = Array.isArray(data.sms_errors) && data.sms_errors.length
           ? ` Reason: ${data.sms_errors[0]}`
           : !data.sms_configured
             ? ' SMS is not set up on the server yet.'
             : ' Open MySMSGate on the gateway phone and keep it online.';
         setNotifyMessage(
-          `Batch sent. Emails: ${data.emails_sent ?? 0}. SMS failed for ${data.sms_failed} student(s).${reason}`
+          `Batch sent (${mode}). Emails: ${data.emails_sent ?? 0}. SMS failed for ${data.sms_failed} student(s).${reason}`
         );
       } else {
-        setNotifyMessage(
-          `Batch sent. Notified ${data.notified_count}, emails ${data.emails_sent ?? 0}, SMS ${data.sms_sent ?? 0}.`
-        );
+        const bits = [`Batch sent (${mode})`, `notified ${data.notified_count}`];
+        if (mode === 'email' || mode === 'both') {
+          bits.push(`emails ${data.emails_sent ?? 0}`);
+        }
+        if (mode === 'sms' || mode === 'both') {
+          bits.push(`SMS ${data.sms_sent ?? 0}`);
+        }
+        setNotifyMessage(bits.join(' · '));
       }
       if (data.shortage) {
         setNotifyError(
@@ -287,6 +293,7 @@ export default function AdminDashboard() {
         body: {
           queue_entry_id: queueEntryId,
           scheduled_date: nextDate,
+          channel,
         },
       });
       setQueueMessage(data.message || 'Rescheduled.');

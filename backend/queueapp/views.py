@@ -15,6 +15,7 @@ from .notifications import (
     build_approval_message,
     build_approval_sms,
     deliver_student_notification,
+    normalize_notify_channel,
     resolve_student_contacts,
 )
 from .auth_utils import (
@@ -310,6 +311,7 @@ def build_live_batch_payload(batch, *, message=None, rescheduled=False, extras=N
     ).count()
     payload = {
         "batch": NotificationBatchSerializer(batch).data,
+        "channel": normalize_notify_channel(getattr(batch, "channel", None) or "both"),
         "message": message
         or (
             f"{len(students)} student{'s' if len(students) != 1 else ''} still in this "
@@ -423,6 +425,11 @@ def return_student_to_waiting_queue(entry):
 
 
 def apply_reschedule(entry, scheduled_date, *, notify=True, channel="both", position=None):
+    """
+    Assign secret code + approval day. When notify=True, send only on the
+    supervisor channel (email | sms | both).
+    """
+    channel = normalize_notify_channel(channel)
     code = entry.assign_secret_code()
     entry.status = QueueEntry.Status.NOTIFIED
     entry.scheduled_date = scheduled_date
@@ -461,8 +468,7 @@ def apply_reschedule(entry, scheduled_date, *, notify=True, channel="both", posi
             secret_code=code,
             position=entry.position,
         )
-        subject = f"KabQue: Rescheduled approval on {scheduled_date.isoformat()}"
-        # Same profile email/phone the fresher saved after signup
+        subject = f"KabQue: Document approval on {scheduled_date.isoformat()}"
         channels = deliver_student_notification(
             user=entry.student.user,
             channel=channel,
@@ -472,6 +478,40 @@ def apply_reschedule(entry, scheduled_date, *, notify=True, channel="both", posi
         )
 
     return code, channels
+
+
+def tally_delivery_attempts(channels_tried, *, email_ok, email_fail, sms_ok, sms_fail, sms_errors):
+    """Accumulate delivery counters from one student's channel attempt list."""
+    for attempt in channels_tried or []:
+        if attempt.get("channel") == "email":
+            if attempt.get("success"):
+                email_ok += 1
+            else:
+                email_fail += 1
+        elif attempt.get("channel") == "sms":
+            if attempt.get("success"):
+                sms_ok += 1
+            else:
+                sms_fail += 1
+                err = attempt.get("error") or ""
+                if err and err not in sms_errors:
+                    sms_errors.append(err)
+    return email_ok, email_fail, sms_ok, sms_fail, sms_errors
+
+
+def channel_delivery_summary(channel, *, email_ok, email_fail, sms_ok, sms_fail) -> str:
+    """Human summary that only mentions channels the supervisor selected."""
+    mode = normalize_notify_channel(channel)
+    parts = []
+    if mode in ("email", "both"):
+        parts.append(f"Emails: {email_ok}")
+        if email_fail:
+            parts.append(f"Email failed: {email_fail}")
+    if mode in ("sms", "both"):
+        parts.append(f"SMS: {sms_ok}")
+        if sms_fail:
+            parts.append(f"SMS failed: {sms_fail}")
+    return (" " + ". ".join(parts) + ".") if parts else ""
 
 
 def build_student_day_progress(entry):
@@ -1454,7 +1494,7 @@ class NotifyBatchView(APIView):
         serializer.is_valid(raise_exception=True)
         requested = serializer.validated_data["batch_size"]
         scheduled_date = serializer.validated_data["scheduled_date"]
-        channel = serializer.validated_data["channel"]
+        channel = normalize_notify_channel(serializer.validated_data["channel"])
 
         leftovers = collect_batch_leftovers()
         waiting_qs = (
@@ -1514,12 +1554,19 @@ class NotifyBatchView(APIView):
         results = []
         email_ok = email_fail = sms_ok = sms_fail = 0
         sms_errors = []
-        now = timezone.now()
         batch_number = 0
 
         def append_delivery(entry, code, channels_tried, number):
             nonlocal email_ok, email_fail, sms_ok, sms_fail
-            body = build_approval_message(
+            email_ok, email_fail, sms_ok, sms_fail, _ = tally_delivery_attempts(
+                channels_tried,
+                email_ok=email_ok,
+                email_fail=email_fail,
+                sms_ok=sms_ok,
+                sms_fail=sms_fail,
+                sms_errors=sms_errors,
+            )
+            email_body = build_approval_message(
                 full_name=entry.student.full_name,
                 registration_number=entry.student.registration_number,
                 scheduled_date=scheduled_date,
@@ -1533,32 +1580,19 @@ class NotifyBatchView(APIView):
                 secret_code=code,
                 position=number,
             )
-            for attempt in channels_tried:
-                if attempt["channel"] == "email":
-                    if attempt["success"]:
-                        email_ok += 1
-                    else:
-                        email_fail += 1
-                elif attempt["channel"] == "sms":
-                    if attempt["success"]:
-                        sms_ok += 1
-                    else:
-                        sms_fail += 1
-                        err = attempt.get("error") or ""
-                        if err and err not in sms_errors:
-                            sms_errors.append(err)
+            for attempt in channels_tried or []:
                 NotificationLog.objects.create(
                     batch=batch,
                     queue_entry=entry,
                     channel=attempt["channel"],
                     destination=attempt.get("destination") or "",
-                    body=body if attempt["channel"] == "email" else sms_body,
+                    body=email_body if attempt["channel"] == "email" else sms_body,
                     success=attempt["success"],
                     error_message=attempt.get("error") or "",
                 )
             results.append(serialize_batch_student(entry, channels=channels_tried))
 
-        # 1) Carry remaining unapproved from prior batch tables — get numbers first
+        # 1) Carry remaining unapproved from prior batch tables
         for locked in carry_entries:
             entry = (
                 QueueEntry.objects.select_for_update()
@@ -1579,7 +1613,7 @@ class NotifyBatchView(APIView):
             entry.refresh_from_db()
             append_delivery(entry, code, channels_tried, batch_number)
 
-        # 2) Fill remaining seats from waiting (arrival order)
+        # 2) Waiting joiners — same notify path (email / sms / both)
         for locked in waiting_entries:
             entry = (
                 QueueEntry.objects.select_for_update()
@@ -1589,45 +1623,15 @@ class NotifyBatchView(APIView):
             )
             if entry is None:
                 continue
-
             batch_number += 1
-            code = entry.assign_secret_code()
-            entry.status = QueueEntry.Status.NOTIFIED
-            entry.scheduled_date = scheduled_date
-            entry.notified_at = now
-            entry.position = batch_number
-            entry.save(
-                update_fields=[
-                    "secret_code",
-                    "status",
-                    "scheduled_date",
-                    "notified_at",
-                    "position",
-                    "updated_at",
-                ]
-            )
-            subject = f"KabQue: Document approval on {scheduled_date.isoformat()}"
-            body = build_approval_message(
-                full_name=entry.student.full_name,
-                registration_number=entry.student.registration_number,
-                scheduled_date=scheduled_date,
-                secret_code=code,
-                position=batch_number,
-            )
-            sms_body = build_approval_sms(
-                full_name=entry.student.full_name,
-                registration_number=entry.student.registration_number,
-                scheduled_date=scheduled_date,
-                secret_code=code,
-                position=batch_number,
-            )
-            channels_tried = deliver_student_notification(
-                user=entry.student.user,
+            code, channels_tried = apply_reschedule(
+                entry,
+                scheduled_date,
+                notify=True,
                 channel=channel,
-                subject=subject,
-                email_body=body,
-                sms_body=sms_body,
+                position=batch_number,
             )
+            entry.refresh_from_db()
             append_delivery(entry, code, channels_tried, batch_number)
 
         if not results:
@@ -1656,14 +1660,13 @@ class NotifyBatchView(APIView):
                 f"{max(0, len(results) - carried_count)} newly waiting). "
                 f"{remaining} still waiting."
             )
-        if channel in ("email", "both"):
-            message += f" Emails: {email_ok}."
-            if email_fail:
-                message += f" Email failed: {email_fail}."
-        if channel in ("sms", "both"):
-            message += f" SMS: {sms_ok}."
-            if sms_fail:
-                message += f" SMS failed: {sms_fail}."
+        message += channel_delivery_summary(
+            channel,
+            email_ok=email_ok,
+            email_fail=email_fail,
+            sms_ok=sms_ok,
+            sms_fail=sms_fail,
+        )
 
         return Response(
             {
@@ -1674,11 +1677,12 @@ class NotifyBatchView(APIView):
                 "carried_from_batch": carried_count,
                 "from_waiting": max(0, len(results) - carried_count),
                 "notified_count": len(results),
-                "emails_sent": email_ok,
-                "emails_failed": email_fail,
-                "sms_sent": sms_ok,
-                "sms_failed": sms_fail,
-                "sms_errors": sms_errors[:3],
+                "channel": channel,
+                "emails_sent": email_ok if channel in ("email", "both") else 0,
+                "emails_failed": email_fail if channel in ("email", "both") else 0,
+                "sms_sent": sms_ok if channel in ("sms", "both") else 0,
+                "sms_failed": sms_fail if channel in ("sms", "both") else 0,
+                "sms_errors": sms_errors[:3] if channel in ("sms", "both") else [],
                 "sms_configured": bool(
                     (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
                 ),
@@ -1960,6 +1964,10 @@ class AdminRescheduleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        channel = normalize_notify_channel(
+            serializer.validated_data.get("channel") or "both"
+        )
+
         # Leave the day's leftover batch table — they're moved to a new schedule
         linked = batch_ids_for_entry(entry.id)
         detach_entry_from_batches(entry)
@@ -1967,13 +1975,17 @@ class AdminRescheduleView(APIView):
             recompact_batch_positions(bid)
 
         code, channels = apply_reschedule(
-            entry, serializer.validated_data["scheduled_date"], notify=True
+            entry,
+            serializer.validated_data["scheduled_date"],
+            notify=True,
+            channel=channel,
         )
         entry.refresh_from_db()
         return Response(
             {
                 "message": f"Rescheduled to {serializer.validated_data['scheduled_date']}.",
                 "secret_code": code,
+                "channel": channel,
                 "channels": channels,
                 "entry": AdminQueueEntrySerializer(entry).data,
             }
@@ -2029,7 +2041,9 @@ class AdminBatchRescheduleView(APIView):
         batch_id = serializer.validated_data["batch_id"]
         requested = serializer.validated_data["count"]
         scheduled_date = serializer.validated_data["scheduled_date"]
-        channel = serializer.validated_data.get("channel") or "both"
+        channel = normalize_notify_channel(
+            serializer.validated_data.get("channel") or "both"
+        )
 
         source_batch = NotificationBatch.objects.filter(id=batch_id).first()
         if not source_batch:
@@ -2135,14 +2149,13 @@ class AdminBatchRescheduleView(APIView):
                 f" Requested {requested}; only {available} were still in the batch "
                 f"table (others were already approved)."
             )
-        if channel in ("email", "both"):
-            message += f" Emails: {email_ok}."
-            if email_fail:
-                message += f" Email failed: {email_fail}."
-        if channel in ("sms", "both"):
-            message += f" SMS: {sms_ok}."
-            if sms_fail:
-                message += f" SMS failed: {sms_fail}."
+        message += channel_delivery_summary(
+            channel,
+            email_ok=email_ok,
+            email_fail=email_fail,
+            sms_ok=sms_ok,
+            sms_fail=sms_fail,
+        )
 
         remaining = QueueEntry.objects.filter(status=QueueEntry.Status.WAITING).count()
         return Response(
@@ -2154,11 +2167,12 @@ class AdminBatchRescheduleView(APIView):
                 "available": available,
                 "notified_count": len(results),
                 "remaining_in_batch": len(results),
-                "emails_sent": email_ok,
-                "emails_failed": email_fail,
-                "sms_sent": sms_ok,
-                "sms_failed": sms_fail,
-                "sms_errors": sms_errors[:3],
+                "channel": channel,
+                "emails_sent": email_ok if channel in ("email", "both") else 0,
+                "emails_failed": email_fail if channel in ("email", "both") else 0,
+                "sms_sent": sms_ok if channel in ("sms", "both") else 0,
+                "sms_failed": sms_fail if channel in ("sms", "both") else 0,
+                "sms_errors": sms_errors[:3] if channel in ("sms", "both") else [],
                 "sms_configured": bool(
                     (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
                 ),
