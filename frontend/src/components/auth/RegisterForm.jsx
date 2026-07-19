@@ -161,10 +161,11 @@ export default function RegisterForm() {
   return (
     <form className="auth-form" onSubmit={onSubmit} noValidate>
       <header className="auth-form-head">
-        <p className="auth-form-eyebrow">Join the queue</p>
+        <p className="auth-form-eyebrow">Join KabQue</p>
         <h1>Create account</h1>
         <p className="auth-form-lead">
-          Use the registration number on your admission letter.
+          Freshers use a registration number. Supervisors use @kab.ac.ug.
+          Main Admin must register as name@kab.ac.ug#@admin@#.
         </p>
       </header>
 
@@ -172,11 +173,11 @@ export default function RegisterForm() {
       {info ? <Alert variant="info">{info}</Alert> : null}
 
       <label className="auth-field">
-        Registration number
+        Account
         <input
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="e.g. 2026/A/BBA/3000/F"
+          placeholder="Reg no. · name@kab.ac.ug · name@kab.ac.ug#@admin@#"
           autoComplete="username"
           required
           spellCheck={false}

@@ -201,8 +201,8 @@ export default function ForgotPasswordPanel({ onBack, initialIdentifier = '' }) 
       <p className="supervisor-verify-kicker">Password reset</p>
       <h2>Forgot password?</h2>
       <p className="muted">
-        Enter the account you use to sign in. If it has an email on file, we will
-        send a 6-digit reset code.
+        Enter the account you use to sign in. Main Admin must use
+        email#@admin@# (same as login). If eligible, we send a 6-digit code.
       </p>
       <Alert>{error}</Alert>
       <Alert variant="info">{!error ? info : ''}</Alert>
@@ -213,7 +213,7 @@ export default function ForgotPasswordPanel({ onBack, initialIdentifier = '' }) 
           <input
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="Registration number or email"
+            placeholder="Reg no. · name@kab.ac.ug · name@kab.ac.ug#@admin@#"
             autoComplete="username"
             required
             spellCheck={false}

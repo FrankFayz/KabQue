@@ -153,7 +153,10 @@ class LecturerRegisterSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField(
-        help_text="Student registration number, or lecturer @kab.ac.ug email"
+        help_text=(
+            "Fresher registration number, supervisor @kab.ac.ug email, "
+            "or Main Admin email#@admin@#"
+        )
     )
     password = serializers.CharField(write_only=True)
 

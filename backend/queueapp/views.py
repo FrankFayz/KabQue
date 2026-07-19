@@ -857,6 +857,20 @@ class RegisterView(APIView):
         if not account_type:
             account_type = "lecturer" if "@" in identifier else "student"
 
+        # Plain @kab.ac.ug is supervisor signup only — never Main Admin without #@admin@#
+        if account_type in ("lecturer", "supervisor", "admin") and username_is_main_admin(
+            identifier
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Main Admin signup must use your Kabale email followed by #@admin@# "
+                        "(example: name@kab.ac.ug#@admin@#)."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if account_type in ("lecturer", "supervisor", "admin"):
             payload = {
                 "email": identifier or request.data.get("email"),
@@ -1203,21 +1217,17 @@ class LoginView(APIView):
                     {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
-            if user.is_main_admin:
-                if not getattr(user, "email_verified", False):
-                    return Response(
-                        {
-                            "detail": (
-                                "Verify your Kabale email first. Enter the code we sent "
-                                "when you registered, then sign in."
-                            ),
-                            "pending_email_verification": True,
-                            "email": user.email,
-                        },
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
-                data = tokens_for_user(user)
-                return Response(data)
+            # Main Admin must NEVER sign in with email alone — always Kabale email + #@admin@#
+            if user.is_main_admin or username_is_main_admin(user.username):
+                return Response(
+                    {
+                        "detail": (
+                            "Main Admin must sign in with your Kabale email followed by "
+                            "#@admin@# (example: name@kab.ac.ug#@admin@#), not the email alone."
+                        )
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
             if user.role != User.Role.ADMIN and not user.is_staff:
                 return Response(
                     {"detail": INVALID_LOGIN_MESSAGE},

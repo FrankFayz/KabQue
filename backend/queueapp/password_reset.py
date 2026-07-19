@@ -73,10 +73,8 @@ def resolve_reset_target(identifier: str) -> tuple[object | None, str]:
         if user is None or not user.is_active:
             return None, ""
         if user.is_main_admin:
-            contact = main_admin_contact_email(user) or email
-            if not is_kab_university_email(contact):
-                return None, ""
-            return user, contact
+            # Main Admin must use email#@admin@# — never bare Kabale email
+            return None, ""
         if user.role == User.Role.ADMIN or user.is_staff:
             if not is_kab_university_email(email):
                 return None, ""

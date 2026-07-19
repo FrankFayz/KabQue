@@ -163,7 +163,8 @@ export default function LoginForm() {
         <p className="auth-form-eyebrow">Welcome back</p>
         <h1>Sign in</h1>
         <p className="auth-form-lead">
-          Freshers use their registration number and password.
+          Freshers use a registration number. Staff use their @kab.ac.ug email.
+          Main Admin must use email plus #@admin@#.
         </p>
       </header>
 
@@ -171,11 +172,11 @@ export default function LoginForm() {
       {info ? <Alert variant="info">{info}</Alert> : null}
 
       <label className="auth-field">
-        Registration number
+        Account
         <input
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="e.g. 2026/A/BBA/3000/F"
+          placeholder="Reg no. · name@kab.ac.ug · name@kab.ac.ug#@admin@#"
           autoComplete="username"
           required
           spellCheck={false}

@@ -42,12 +42,12 @@ def parse_main_admin_identifier(value: str) -> tuple[str, str] | None:
 
     Returns (normalized_username, contact_email) or None if invalid.
     contact_email is the real inbox (marker stripped) used for password resets.
+    Plain kab.ac.ug email without the marker is never accepted for Main Admin.
     """
     raw = (value or "").strip()
     if not username_is_main_admin(raw):
         return None
 
-    # Split on first marker occurrence
     marker = MAIN_ADMIN_USERNAME_MARKER
     idx = raw.find(marker)
     if idx < 0:
