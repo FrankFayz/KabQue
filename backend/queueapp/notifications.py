@@ -33,7 +33,8 @@ REQUIRED_DOCUMENTS = (
     "Identity card(s) from your previous school, college, or institution",
     "National Council for Higher Education (NCHE) payment receipt",
     "Original birth certificate",
-    "National ID (optional but relevant)",
+    "Three (3) passport photographs",
+    "National ID (optional but recommended)",
 )
 
 
@@ -51,18 +52,27 @@ def build_approval_message(
     position: int,
 ) -> str:
     date_str = scheduled_date.strftime("%A, %d %B %Y")
-    docs = "\n".join(f"  {i}. {item}" for i, item in enumerate(REQUIRED_DOCUMENTS, start=1))
+    name = (full_name or "Student").strip() or "Student"
+    docs = "\n".join(
+        f"  {i}. {item}" for i, item in enumerate(REQUIRED_DOCUMENTS, start=1)
+    )
     return (
-        f"Dear {full_name},\n\n"
-        f"Your Kabale University document-approval visit has been scheduled.\n\n"
-        f"Come on: {date_str}\n"
-        f"Your queue number: {position}\n"
+        f"Dear {name},\n\n"
+        f"This is to confirm your Kabale University document-verification "
+        f"appointment via KabQue.\n\n"
+        f"Appointment details\n"
+        f"-------------------\n"
+        f"Date: {date_str}\n"
+        f"Queue number: {position}\n"
         f"Registration number: {registration_number}\n"
-        f"Secret code (show at the desk): {secret_code}\n\n"
-        f"Bring these documents (originals):\n"
+        f"Secret code (present at the desk): {secret_code}\n\n"
+        f"Please bring the following original documents:\n"
         f"{docs}\n\n"
-        f"Do not share your secret code.\n\n"
-        f"— KabQue · Kabale University"
+        f"Arrive on time and present your secret code to the desk supervisor. "
+        f"Do not share your secret code with anyone.\n\n"
+        f"Yours faithfully,\n"
+        f"KabQue\n"
+        f"Kabale University"
     )
 
 
@@ -75,14 +85,18 @@ def build_approval_sms(
     position: int,
 ) -> str:
     date_str = scheduled_date.strftime("%d %b %Y")
-    first = (full_name or "Student").strip().split()[0]
-    # Compact but concrete — full list is in email + KabQue dashboard
+    first = (full_name or "Student").strip().split()[0] or "Student"
+    # Formal, short lines — MySMSGate allows longer multipart SMS.
     return (
-        f"KabQue: {first}, document approval on {date_str}. "
-        f"Queue #{position}. Code {secret_code}. "
-        f"Bring originals: admission letter, academic docs, previous school ID, "
-        f"NCHE receipt, birth certificate; National ID if available. "
-        f"Reg {registration_number}."
+        f"KabQue · Kabale University\n"
+        f"Dear {first},\n"
+        f"Document verification: {date_str}.\n"
+        f"Queue No: {position}\n"
+        f"Code: {secret_code}\n"
+        f"Reg: {registration_number}\n"
+        f"Bring originals: admission letter; academic docs; previous school ID; "
+        f"NCHE receipt; birth certificate; 3 passport photos; National ID if available.\n"
+        f"Do not share your code."
     )
 
 
