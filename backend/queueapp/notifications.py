@@ -220,9 +220,27 @@ def _parse_mysmsgate_error(raw: str, fallback: str = "MySMSGate request failed")
     return str(parsed)[:400]
 
 
+def _looks_like_cloudflare_challenge(raw: str) -> bool:
+    text = (raw or "").lower()
+    return (
+        "just a moment" in text
+        or "cf-chl" in text
+        or "challenges.cloudflare.com" in text
+        or "cdn-cgi/challenge-platform" in text
+        or ("<!doctype html" in text and "cloudflare" in text)
+    )
+
+
 def _mysmsgate_hint(status_code: int, detail: str) -> str:
     """Calm, non-technical copy for the desk — keep provider jargon in logs only."""
     lower = (detail or "").lower()
+
+    if _looks_like_cloudflare_challenge(detail) or "cloudflare" in lower:
+        return (
+            "Text messages could not be sent from the live server right now. "
+            "The SMS provider is blocking that connection — try again shortly, "
+            "or ask the system admin to switch the SMS API address."
+        )
 
     # Explicit key rejection only — do not treat every 401 as a bad key
     # (offline gateways sometimes return Unauthorized too).
@@ -304,22 +322,65 @@ def _parse_optional_sim_slot(raw) -> int | None:
     return None
 
 
-def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, int, str, dict | None]:
+def _mysmsgate_send_endpoints(configured: str) -> list[str]:
+    """Candidate send URLs — API host first (avoids Cloudflare on www)."""
+    primary = (configured or "").strip() or "https://api.mysmsgate.net/api/v1/send"
+    candidates = [
+        primary,
+        "https://api.mysmsgate.net/api/v1/send",
+        "https://mysmsgate.net/api/v1/send",
+    ]
+    seen = set()
+    out = []
+    for url in candidates:
+        key = url.rstrip("/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(url.rstrip("/"))
+    return out
+
+
+def _mysmsgate_post(
+    endpoint: str,
+    api_key: str,
+    payload: dict,
+    *,
+    auth_mode: str = "bearer",
+) -> tuple[bool, int, str, dict | None]:
     """POST JSON to MySMSGate. Returns (ok, status_code, error_or_empty, parsed)."""
     data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "KabQue-SMS/1.0 (+https://kabque.onrender.com)",
+    }
+    if auth_mode == "x-api-key":
+        headers["X-API-KEY"] = api_key
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     req = urllib.request.Request(
         endpoint,
         data=data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
+        headers=headers,
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
+            if _looks_like_cloudflare_challenge(raw):
+                logger.error(
+                    "MySMSGate blocked by Cloudflare challenge (HTTP %s) at %s",
+                    resp.status,
+                    endpoint,
+                )
+                return (
+                    False,
+                    resp.status,
+                    _mysmsgate_hint(resp.status, raw),
+                    None,
+                )
             parsed = None
             if raw:
                 try:
@@ -328,12 +389,13 @@ def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, i
                     parsed = None
             if _mysmsgate_accepted(resp.status, parsed):
                 logger.info(
-                    "MySMSGate accepted SMS to %s (HTTP %s, status=%s, slot=%s, sms_id=%s)",
+                    "MySMSGate accepted SMS to %s (HTTP %s, status=%s, slot=%s, sms_id=%s, via=%s)",
                     payload.get("to"),
                     resp.status,
                     (parsed or {}).get("status", "ok"),
                     payload.get("slot"),
                     (parsed or {}).get("sms_id") or (parsed or {}).get("id"),
+                    endpoint,
                 )
                 return True, resp.status, "", parsed if isinstance(parsed, dict) else None
             return (
@@ -344,12 +406,20 @@ def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, i
             )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        logger.error(
-            "MySMSGate SMS failed (%s) payload_keys=%s: %s",
-            exc.code,
-            sorted(payload.keys()),
-            detail,
-        )
+        if _looks_like_cloudflare_challenge(detail):
+            logger.error(
+                "MySMSGate Cloudflare challenge (HTTP %s) at %s — datacenter IP blocked",
+                exc.code,
+                endpoint,
+            )
+        else:
+            logger.error(
+                "MySMSGate SMS failed (%s) payload_keys=%s via=%s: %s",
+                exc.code,
+                sorted(payload.keys()),
+                endpoint,
+                detail[:400],
+            )
         return (
             False,
             exc.code,
@@ -357,37 +427,66 @@ def _mysmsgate_post(endpoint: str, api_key: str, payload: dict) -> tuple[bool, i
             None,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.exception("MySMSGate SMS network error")
+        logger.exception("MySMSGate SMS network error via %s", endpoint)
         return False, 0, str(exc)[:160], None
+
+
+def _mysmsgate_post_with_fallback(
+    api_key: str, payload: dict, configured_url: str
+) -> tuple[bool, int, str, dict | None]:
+    """Try API host + auth header variants until one accepts JSON."""
+    last = (False, 0, "SMS send failed", None)
+    for endpoint in _mysmsgate_send_endpoints(configured_url):
+        for auth_mode in ("bearer", "x-api-key"):
+            ok, code, err, parsed = _mysmsgate_post(
+                endpoint, api_key, payload, auth_mode=auth_mode
+            )
+            last = (ok, code, err, parsed)
+            if ok:
+                return last
+            # Cloudflare on this host — try next host/auth immediately.
+            if err and "blocking that connection" in err.lower():
+                continue
+            # Non-challenge auth failure on a host — still try other auth/host.
+            continue
+    return last
 
 
 def _mysmsgate_poll_status(api_key: str, sms_id) -> str:
     """Return latest provider status string for an SMS id (best-effort)."""
     if sms_id in (None, ""):
         return ""
-    url = f"https://mysmsgate.net/api/v1/sms?id={sms_id}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-        },
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            parsed = json.loads(raw) if raw else {}
-    except Exception:  # noqa: BLE001
-        return ""
-    if not isinstance(parsed, dict):
-        return ""
-    return str(
-        parsed.get("status")
-        or parsed.get("state")
-        or (parsed.get("sms") or {}).get("status")
-        or ""
-    ).strip().lower()
+    for base in (
+        "https://api.mysmsgate.net/api/v1/sms",
+        "https://mysmsgate.net/api/v1/sms",
+    ):
+        url = f"{base}?id={sms_id}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json",
+                "User-Agent": "KabQue-SMS/1.0 (+https://kabque.onrender.com)",
+            },
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                if _looks_like_cloudflare_challenge(raw):
+                    continue
+                parsed = json.loads(raw) if raw else {}
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        return str(
+            parsed.get("status")
+            or parsed.get("state")
+            or (parsed.get("sms") or {}).get("status")
+            or ""
+        ).strip().lower()
+    return ""
 
 
 def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
@@ -464,7 +563,9 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         "and try again in a moment."
     )
     for payload in unique:
-        ok, _code, err, parsed = _mysmsgate_post(endpoint, api_key, payload)
+        ok, _code, err, parsed = _mysmsgate_post_with_fallback(
+            api_key, payload, endpoint
+        )
         if not ok:
             if err:
                 last_error = err

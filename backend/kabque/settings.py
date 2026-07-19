@@ -200,9 +200,11 @@ NATIONWIDE_GPS_TESTING = os.getenv("NATIONWIDE_GPS_TESTING", "True").lower() in 
 
 # MySMSGate — SMS via your connected Android phone
 MYSMSGATE_API_KEY = _clean_mysmsgate_api_key(os.getenv("MYSMSGATE_API_KEY", ""))
+# Prefer the API host — www mysmsgate.net is fronted by Cloudflare and often
+# challenges Render datacenter IPs (403 HTML "Just a moment...").
 MYSMSGATE_API_URL = _clean_env(
-    os.getenv("MYSMSGATE_API_URL", "https://mysmsgate.net/api/v1/send")
-) or "https://mysmsgate.net/api/v1/send"
+    os.getenv("MYSMSGATE_API_URL", "https://api.mysmsgate.net/api/v1/send")
+) or "https://api.mysmsgate.net/api/v1/send"
 MYSMSGATE_DEVICE_ID = _clean_env(os.getenv("MYSMSGATE_DEVICE_ID", ""))
 MYSMSGATE_SIM_SLOT = _clean_env(os.getenv("MYSMSGATE_SIM_SLOT", ""))
 
