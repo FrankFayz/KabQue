@@ -2,8 +2,7 @@ import Panel from '../ui/Panel';
 import Alert from '../ui/Alert';
 
 /**
- * “Available to schedule” = unscheduled students still in the live queue
- * (status waiting). Batch leftovers are separate — they are not this count.
+ * Notify waiting (unscheduled) students — batch leftovers are handled separately.
  */
 export default function NotifyBatchForm({
   batchSize,
@@ -26,64 +25,46 @@ export default function NotifyBatchForm({
   const overRequest = unscheduled > 0 && requested > unscheduled;
 
   return (
-    <Panel title="Notify next batch">
+    <Panel title="Notify batch" className="desk-panel desk-panel-notify">
       <form onSubmit={onSubmit} className="stack-form">
-        <div
-          className={`notify-remaining-banner${unscheduled > 0 ? ' has-pool' : ''}`}
-        >
-          <span className="label">Available to schedule</span>
-          <strong>{unscheduled}</strong>
-          <span className="notify-pool-breakdown">
-            Unscheduled in queue (no approval day yet)
-          </span>
+        <p className="desk-panel-lead">
+          <strong>{unscheduled}</strong> waiting
+          {carry > 0 ? (
+            <>
+              {' '}
+              · <strong>{carry}</strong> leftover in batch
+            </>
+          ) : null}
+        </p>
+
+        <div className="desk-form-row">
+          <label>
+            Students
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={batchSize}
+              onChange={(e) => onBatchSizeChange(e.target.value)}
+              required
+              disabled={busy}
+            />
+          </label>
+          <label>
+            Approval day
+            <input
+              type="date"
+              value={scheduledDate}
+              min={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => onScheduledDateChange(e.target.value)}
+              required
+              disabled={busy}
+            />
+          </label>
         </div>
 
         <label>
-          How many students
-          <input
-            type="number"
-            min={1}
-            max={500}
-            value={batchSize}
-            onChange={(e) => onBatchSizeChange(e.target.value)}
-            required
-            disabled={busy}
-          />
-        </label>
-
-        {!canNotify ? (
-          <p className="notify-warn">
-            Nothing to notify. No unscheduled students in the queue.
-          </p>
-        ) : null}
-        {canNotify && unscheduled === 0 && carry > 0 ? (
-          <p className="notify-warn notify-warn-info">
-            No unscheduled joiners right now. Notify will use {carry} student
-            {carry === 1 ? '' : 's'} still left in a batch table.
-          </p>
-        ) : null}
-        {overRequest ? (
-          <p className="notify-warn">
-            Only {unscheduled} unscheduled student
-            {unscheduled === 1 ? '' : 's'} in the queue. The system will take
-            what is available
-            {carry > 0 ? ` (plus ${carry} from a batch table)` : ''}.
-          </p>
-        ) : null}
-
-        <label>
-          Approval date
-          <input
-            type="date"
-            value={scheduledDate}
-            min={new Date().toISOString().slice(0, 10)}
-            onChange={(e) => onScheduledDateChange(e.target.value)}
-            required
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Channel
+          Send via
           <select
             value={channel}
             onChange={(e) => onChannelChange(e.target.value)}
@@ -95,6 +76,22 @@ export default function NotifyBatchForm({
             <option value="sms">SMS only</option>
           </select>
         </label>
+
+        {!canNotify ? (
+          <p className="notify-warn">No students waiting to notify.</p>
+        ) : null}
+        {canNotify && unscheduled === 0 && carry > 0 ? (
+          <p className="notify-warn notify-warn-info">
+            Queue is empty — notify will use {carry} student
+            {carry === 1 ? '' : 's'} still in a batch table.
+          </p>
+        ) : null}
+        {overRequest ? (
+          <p className="notify-warn">
+            Only {unscheduled} waiting
+            {carry > 0 ? ` (+${carry} leftover)` : ''}. We’ll take what’s available.
+          </p>
+        ) : null}
 
         <Alert>{error}</Alert>
         <Alert variant="info">{!error ? message : ''}</Alert>

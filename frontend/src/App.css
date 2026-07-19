@@ -2583,25 +2583,38 @@ textarea:focus {
 
 /* —— Supervisor desk —— */
 .desk-dash {
-  gap: clamp(1.05rem, 2.4vw, 1.45rem);
-  max-width: 1120px;
+  gap: clamp(0.95rem, 2vw, 1.25rem);
+  max-width: 1080px;
   margin-inline: auto;
 }
 
 .desk-zone {
   display: grid;
-  gap: 0.7rem;
+  gap: 0.55rem;
   min-width: 0;
+}
+
+.desk-zone-ops {
+  scroll-margin-top: 1rem;
+}
+
+.desk-anchor {
+  min-width: 0;
+  scroll-margin-top: 1rem;
+  height: 100%;
+}
+
+.desk-anchor > .panel {
+  height: 100%;
 }
 
 .desk-zone-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.55rem 1.1rem;
+  gap: 0.45rem 1rem;
   min-width: 0;
-  padding-bottom: 0.15rem;
 }
 
 .desk-zone-kicker {
@@ -2616,10 +2629,11 @@ textarea:focus {
 .desk-zone-head h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(1.05rem, 2vw, 1.28rem);
+  font-size: clamp(1rem, 1.8vw, 1.15rem);
   color: var(--kab-blue-ink);
   line-height: 1.2;
   letter-spacing: -0.01em;
+  font-weight: 700;
 }
 
 .desk-zone-lede {
@@ -2643,26 +2657,83 @@ textarea:focus {
 }
 
 .desk-zone-insight {
-  padding-top: 0.45rem;
+  padding-top: 0.35rem;
   border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+}
+
+.desk-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.desk-flow-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, var(--kab-blue));
+  border-radius: 4px;
+  background: var(--kab-white);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.desk-flow-step:hover {
+  border-color: color-mix(in srgb, var(--kab-blue) 35%, var(--line));
+  color: var(--kab-blue-ink);
+}
+
+.desk-flow-step.is-active {
+  background: color-mix(in srgb, var(--kab-blue) 8%, white);
+  border-color: var(--kab-blue);
+  color: var(--kab-blue-ink);
+}
+
+.desk-flow-num {
+  display: inline-grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kab-blue) 12%, white);
+  color: var(--kab-blue-deep);
+  font-size: 0.72rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.desk-flow-step.is-active .desk-flow-num {
+  background: var(--kab-blue);
+  color: white;
 }
 
 .desk-welcome {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
-  gap: 1rem 1.25rem;
+  align-items: center;
+  gap: 0.85rem 1.1rem;
   flex-wrap: wrap;
-  padding: clamp(1.15rem, 2.8vw, 1.55rem) clamp(1.1rem, 2.6vw, 1.5rem);
+  padding: 0.95rem 1.1rem;
   background:
     linear-gradient(
       135deg,
       color-mix(in srgb, var(--kab-blue) 6%, white) 0%,
-      var(--kab-white) 42%,
-      color-mix(in srgb, var(--kab-yellow) 8%, white) 100%
+      var(--kab-white) 48%,
+      color-mix(in srgb, var(--kab-yellow) 7%, white) 100%
     );
-  border: 1px solid color-mix(in srgb, var(--kab-blue) 18%, var(--line));
-  border-left: 4px solid var(--kab-blue);
+  border: 1px solid color-mix(in srgb, var(--kab-blue) 16%, var(--line));
+  border-left: 3px solid var(--kab-blue);
   border-radius: 4px;
   min-width: 0;
   position: relative;
@@ -2670,24 +2741,28 @@ textarea:focus {
   animation: kabque-rise 0.45s ease both;
 }
 
+.desk-welcome-slim {
+  padding: 0.8rem 1rem;
+}
+
 .desk-welcome::after {
   content: '';
   position: absolute;
   right: 0;
   top: 0;
-  width: min(42%, 18rem);
+  width: min(36%, 14rem);
   height: 100%;
   background: linear-gradient(
     100deg,
     transparent 0%,
-    color-mix(in srgb, var(--kab-yellow) 14%, transparent) 100%
+    color-mix(in srgb, var(--kab-yellow) 12%, transparent) 100%
   );
   pointer-events: none;
 }
 
 .desk-welcome-copy {
   min-width: 0;
-  flex: 1 1 18rem;
+  flex: 1 1 14rem;
   position: relative;
   z-index: 1;
 }
@@ -2704,18 +2779,164 @@ textarea:focus {
 .desk-welcome h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(1.65rem, 1.25rem + 1.6vw, 2.25rem);
-  line-height: 1.08;
+  font-size: clamp(1.35rem, 1.1rem + 1.1vw, 1.75rem);
+  line-height: 1.1;
   letter-spacing: -0.02em;
   color: var(--kab-blue-ink);
 }
 
 .desk-welcome-lede {
-  margin: 0.5rem 0 0;
+  margin: 0.28rem 0 0;
   color: var(--muted);
-  font-size: 0.94rem;
-  line-height: 1.45;
-  max-width: 38rem;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  max-width: 36rem;
+}
+
+.desk-panel-lead {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.desk-panel-lead strong {
+  color: var(--kab-blue-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.desk-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.desk-empty-card {
+  padding: 1.15rem 1.2rem;
+  border: 1px dashed color-mix(in srgb, var(--line) 80%, var(--kab-blue));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--kab-blue) 3%, white);
+  display: grid;
+  gap: 0.25rem;
+}
+
+.desk-empty-card strong {
+  font-family: var(--font-display);
+  color: var(--kab-blue-ink);
+  font-size: 1.05rem;
+}
+
+.desk-empty-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.desk-stat-jump {
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+  appearance: none;
+}
+
+.desk-stat-jump:hover {
+  border-color: color-mix(in srgb, var(--kab-blue) 40%, var(--line));
+}
+
+.desk-stat-jump:focus-visible {
+  outline: 2px solid var(--kab-blue);
+  outline-offset: 2px;
+}
+
+.verify-reg {
+  margin: 0.2rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.verify-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 0.85rem;
+}
+
+.verify-facts dt {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.verify-facts dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--kab-blue-ink);
+  word-break: break-word;
+}
+
+.verify-cta {
+  margin-top: 0.15rem;
+}
+
+.batch-browser-meta {
+  margin: 0.3rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.batch-browser-meta strong {
+  color: var(--kab-blue-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-summary-compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 16rem;
+}
+
+.batch-table-smart .batch-sub {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.queue-card-smart .queue-card-line {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.queue-card-smart .queue-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.queue-card-smart .queue-card-meta code {
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  color: var(--kab-blue-ink);
+  background: color-mix(in srgb, var(--kab-blue) 6%, white);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
 }
 
 .desk-welcome-actions {
@@ -2889,6 +3110,11 @@ textarea:focus {
   border-radius: 4px;
   box-shadow: 0 1px 0 color-mix(in srgb, var(--kab-blue-ink) 4%, transparent);
   animation: kabque-rise 0.55s ease both;
+}
+
+.desk-dash .verify-panel.is-live {
+  border-top-color: var(--kab-green);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kab-green) 22%, transparent);
 }
 
 .desk-dash .queue-opener,

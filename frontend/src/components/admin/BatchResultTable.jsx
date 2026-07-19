@@ -3,28 +3,6 @@ import Panel from '../ui/Panel';
 import Alert from '../ui/Alert';
 import StatusPill from '../ui/StatusPill';
 
-function deliveryLabel(channel) {
-  if (!channel) return null;
-  const dest = (channel.destination || '').trim();
-  if (channel.success) {
-    if (channel.channel === 'sms' && dest) {
-      return { ok: true, text: `SMS → ${dest}` };
-    }
-    if (channel.channel === 'email' && dest) {
-      return { ok: true, text: `Email → ${dest}` };
-    }
-    return { ok: true, text: `${String(channel.channel || '').toUpperCase()} delivered` };
-  }
-  const prefix =
-    channel.channel === 'sms' && dest
-      ? `SMS ${dest}`
-      : String(channel.channel || 'Message').toUpperCase();
-  return {
-    ok: false,
-    text: `${prefix} could not be sent`,
-  };
-}
-
 function defaultTomorrow() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -63,17 +41,16 @@ function ReschedulePanel({
   return (
     <form className="batch-reschedule" onSubmit={handleSubmit}>
       <div className="batch-reschedule-copy">
-        <p className="batch-reschedule-kicker">Awaiting desk approval</p>
-        <h3>Reschedule remaining students</h3>
+        <h3>Move remaining</h3>
         <p>
-          Anyone still in this table (not approved or deleted) can move to a new
-          day. They get fresh queue numbers 1–N and new secret codes.
+          Move unfinished students to a new day. They get fresh queue numbers and
+          codes.
         </p>
       </div>
 
       <div className="batch-reschedule-fields">
         <label>
-          Students to move
+          How many
           <input
             type="number"
             min={1}
@@ -85,7 +62,7 @@ function ReschedulePanel({
           />
         </label>
         <label>
-          New approval date
+          New day
           <input
             type="date"
             value={date}
@@ -99,10 +76,10 @@ function ReschedulePanel({
 
       <p className="batch-reschedule-hint">
         {maxCount < 1
-          ? 'No remaining students — all were approved, deleted, or already moved.'
+          ? 'Nothing left to move.'
           : over
-            ? `Only ${maxCount} remain awaiting desk approval.`
-            : `${maxCount} awaiting · will be numbered 1–${count || 'N'} on the new day`}
+            ? `Only ${maxCount} remain.`
+            : `${maxCount} awaiting · numbered 1–${count || 'N'} on the new day`}
       </p>
 
       <Alert>{error}</Alert>
@@ -117,7 +94,7 @@ function ReschedulePanel({
           className="btn batch-reschedule-submit"
           disabled={busy || maxCount < 1 || !count || Number(count) < 1}
         >
-          {busy ? 'Rescheduling…' : 'Confirm reschedule'}
+          {busy ? 'Moving…' : 'Confirm move'}
         </button>
       </div>
     </form>
@@ -143,7 +120,7 @@ function RowReschedule({ entryId, busy, onReschedule }) {
         disabled={busy || !date}
         onClick={() => onReschedule?.(entryId, date)}
       >
-        Reschedule
+        Move
       </button>
     </div>
   );
@@ -158,16 +135,13 @@ export default function BatchResultTable({
   rescheduleMessage = '',
   studentRescheduleBusy = false,
 }) {
-  const [open, setOpen] = useState(true);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const students = result?.students || [];
   const batchId = result?.batch?.id;
   const remaining = result?.remaining_in_batch ?? students.length;
   const canReschedule = Boolean(batchId && onBatchReschedule && remaining > 0);
   const scheduled =
-    result?.batch?.scheduled_date ||
-    students[0]?.scheduled_date ||
-    '—';
+    result?.batch?.scheduled_date || students[0]?.scheduled_date || '—';
   const dayPassed =
     Boolean(scheduled) &&
     scheduled !== '—' &&
@@ -183,15 +157,20 @@ export default function BatchResultTable({
 
   useEffect(() => {
     setRescheduleOpen(false);
-    setOpen(true);
   }, [batchId]);
 
-  // Past approval day with people still waiting → open reschedule so it is obvious
   useEffect(() => {
     if (dayPassed && canReschedule) setRescheduleOpen(true);
   }, [dayPassed, canReschedule, batchId]);
 
-  if (!result?.batch) return null;
+  if (!result?.batch) {
+    return (
+      <div className="desk-empty-card" role="status">
+        <strong>No active batch</strong>
+        <p>Notify a group above — their codes and day will show here.</p>
+      </div>
+    );
+  }
 
   async function handleRescheduleSubmit({ count, scheduledDate }) {
     if (!onBatchReschedule) return;
@@ -203,89 +182,31 @@ export default function BatchResultTable({
     if (ok) setRescheduleOpen(false);
   }
 
-  const rescheduleForm = rescheduleOpen ? (
-    <ReschedulePanel
-      maxCount={remaining}
-      busy={rescheduleBusy}
-      error={rescheduleError}
-      message={rescheduleMessage}
-      onSubmit={handleRescheduleSubmit}
-      onCancel={() => setRescheduleOpen(false)}
-    />
-  ) : null;
-
-  const openerCopy = remaining > 0
-    ? `${remaining} student${remaining === 1 ? '' : 's'} still awaiting desk approval for ${scheduled}. Reschedule any who were not finished that day onto a new date.`
-    : `All students from this batch have been approved, deleted, or moved. Nothing left to reschedule.`;
-
-  if (!open) {
-    return (
-      <section className="batch-opener" aria-label="Open batch results">
-        <div className="batch-opener-copy">
-          <p className="batch-opener-kicker">Awaiting desk approval</p>
-          <h2>
-            {remaining > 0
-              ? `${remaining} remaining · day ${scheduled}`
-              : 'Batch cleared'}
-          </h2>
-          <p>{openerCopy}</p>
-          {dayPassed ? (
-            <p className="batch-day-ended">
-              Approval day has passed — reschedule remaining students to continue.
-            </p>
-          ) : null}
-          <dl className="batch-opener-meta">
-            <div>
-              <dt>Remaining</dt>
-              <dd>{remaining}</dd>
-            </div>
-            <div>
-              <dt>Day</dt>
-              <dd className="batch-opener-day">{scheduled}</dd>
-            </div>
-          </dl>
-        </div>
-        <div className="batch-opener-actions">
-          <button
-            type="button"
-            className="btn batch-opener-btn"
-            onClick={() => setOpen(true)}
-          >
-            View batch table
-          </button>
-          {canReschedule ? (
-            <button
-              type="button"
-              className="btn batch-opener-reschedule"
-              onClick={() => setRescheduleOpen((v) => !v)}
-              disabled={rescheduleBusy}
-            >
-              {rescheduleOpen ? 'Hide reschedule' : 'Reschedule remaining'}
-            </button>
-          ) : null}
-        </div>
-        {rescheduleForm}
-      </section>
-    );
-  }
-
   return (
-    <Panel wide className="batch-browser">
+    <Panel wide className="batch-browser desk-panel">
       <div className="batch-browser-head">
         <div>
-          <p className="batch-browser-kicker">Live batch table</p>
           <h2>
             {remaining > 0
               ? isRescheduleResult
-                ? 'Rescheduled — awaiting desk approval'
-                : 'Awaiting desk approval'
+                ? 'Moved batch · awaiting desk'
+                : 'Awaiting desk'
               : 'Batch cleared'}
           </h2>
-          <p className="muted">
-            {remaining} remaining · day {scheduled}
-            {result.carried_from_batch
-              ? ` · ${result.carried_from_batch} carried from prior batch`
-              : ''}
+          <p className="batch-browser-meta">
+            <span>
+              <strong>{remaining}</strong> left
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              Day <strong>{scheduled}</strong>
+            </span>
+            {result.carried_from_batch ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{result.carried_from_batch} carried forward</span>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="batch-browser-actions">
@@ -296,29 +217,37 @@ export default function BatchResultTable({
               onClick={() => setRescheduleOpen((v) => !v)}
               disabled={rescheduleBusy}
             >
-              {rescheduleOpen ? 'Hide reschedule' : 'Reschedule remaining'}
+              {rescheduleOpen ? 'Cancel move' : 'Move remaining'}
             </button>
           ) : null}
-          <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>
-            Collapse
-          </button>
         </div>
       </div>
 
-      {rescheduleForm}
+      {rescheduleOpen ? (
+        <ReschedulePanel
+          maxCount={remaining}
+          busy={rescheduleBusy}
+          error={rescheduleError}
+          message={rescheduleMessage}
+          onSubmit={handleRescheduleSubmit}
+          onCancel={() => setRescheduleOpen(false)}
+        />
+      ) : null}
 
       {dayPassed ? (
         <Alert>
-          Approval day {scheduled} has ended. Students still here cannot be
-          approved until you reschedule them onto today or a future day.
+          Day {scheduled} has ended. Move remaining students to today or a future
+          day before approving.
         </Alert>
       ) : null}
 
-      <Alert variant="info">{result.message || openerCopy}</Alert>
+      {result.message && remaining > 0 ? (
+        <Alert variant="info">{result.message}</Alert>
+      ) : null}
       {result.shortage ? (
         <Alert>
-          Requested {result.requested}, only {result.available} available — all
-          available seats were filled (batch leftovers first, then waiting).
+          Asked for {result.requested}, only {result.available} available — all
+          seats filled.
         </Alert>
       ) : null}
       {emailFailed ? (
@@ -326,23 +255,15 @@ export default function BatchResultTable({
       ) : null}
       {smsFailed ? (
         <Alert>
-          Text messages could not be sent for {result.sms_failed} student
-          {result.sms_failed === 1 ? '' : 's'}. Open the SMS app on the gateway
-          phone, keep it online, then try again.
+          SMS failed for {result.sms_failed} student
+          {result.sms_failed === 1 ? '' : 's'}. Keep the gateway phone online,
+          then try again.
         </Alert>
       ) : null}
 
-      <div className="batch-summary-grid">
+      <div className="batch-summary-grid batch-summary-compact">
         <div className="batch-stat">
-          <span className="label">Still awaiting</span>
-          <strong>{remaining}</strong>
-        </div>
-        <div className="batch-stat">
-          <span className="label">Approval day</span>
-          <strong className="batch-stat-date">{scheduled}</strong>
-        </div>
-        <div className="batch-stat">
-          <span className="label">Emails sent</span>
+          <span className="label">Emails</span>
           <strong>
             {result.delivery_pending
               ? `${result.emails_sent ?? 0}…`
@@ -350,7 +271,7 @@ export default function BatchResultTable({
           </strong>
         </div>
         <div className="batch-stat">
-          <span className="label">SMS sent</span>
+          <span className="label">SMS</span>
           <strong>
             {result.delivery_pending
               ? `${result.sms_sent ?? 0}…`
@@ -359,46 +280,43 @@ export default function BatchResultTable({
         </div>
       </div>
       {result.delivery_pending ? (
-        <p className="hint batch-delivery-hint">
-          Confirming email and SMS delivery — totals update as messages go out.
-        </p>
+        <p className="hint batch-delivery-hint">Updating delivery totals…</p>
       ) : null}
 
       {remaining === 0 ? (
         <p className="batch-empty-note">
-          No students remain. Everyone from this batch was approved, deleted, or
-          moved to another day.
+          Everyone from this batch was approved, deleted, or moved.
         </p>
       ) : (
         <div className="table-wrap batch-table-wrap">
-          <table className="batch-table">
+          <table className="batch-table batch-table-smart">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Name</th>
-                <th>Reg. no.</th>
+                <th>Student</th>
                 <th>Status</th>
-                <th>Email</th>
-                <th>SMS to</th>
-                <th>Secret code</th>
-                <th>Reschedule</th>
+                <th>Code</th>
+                <th>Move</th>
               </tr>
             </thead>
             <tbody>
               {students.map((s) => (
-                <tr key={`${s.queue_entry_id || s.registration_number}-${s.secret_code}`}>
+                <tr
+                  key={`${s.queue_entry_id || s.registration_number}-${s.secret_code}`}
+                >
                   <td>
                     <span className="batch-pos">#{s.position}</span>
                   </td>
                   <td>
                     <strong className="batch-name">{s.full_name || '—'}</strong>
+                    <span className="batch-sub">
+                      {s.registration_number || '—'}
+                      {s.phone ? ` · ${s.phone}` : ''}
+                    </span>
                   </td>
-                  <td>{s.registration_number}</td>
                   <td>
                     <StatusPill status={s.status || 'notified'} />
                   </td>
-                  <td className="batch-contact">{s.email || '—'}</td>
-                  <td className="batch-contact">{s.phone || '—'}</td>
                   <td>
                     <code className="batch-code">{s.secret_code || '—'}</code>
                   </td>

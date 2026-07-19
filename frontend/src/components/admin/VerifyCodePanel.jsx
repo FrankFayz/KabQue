@@ -16,14 +16,16 @@ export default function VerifyCodePanel({
   const entry = verified?.entry;
   const student = entry?.student;
   const deskLocked = Boolean(busy || completeBusy);
+  const canDecideToday = Boolean(verified?.schedule_is_today);
 
   return (
-    <Panel title="Confirm identity" className="verify-panel">
+    <Panel
+      title="Check in"
+      className={`desk-panel desk-panel-verify verify-panel${
+        entry ? ' is-live' : ''
+      }`}
+    >
       <form onSubmit={onVerify} className="stack-form">
-        <p className="muted">
-          Enter the secret code from the fresher’s email or SMS. A valid code
-          confirms who they are and shows their assigned day.
-        </p>
         <label>
           Secret code
           <input
@@ -33,12 +35,16 @@ export default function VerifyCodePanel({
             autoComplete="off"
             spellCheck={false}
             required
+            disabled={deskLocked && Boolean(entry)}
           />
         </label>
         <Alert>{error}</Alert>
-        <Alert variant="info">{!error ? message : ''}</Alert>
-        <button className="btn btn-primary" disabled={busy || !secretCode.trim()}>
-          {busy ? 'Checking…' : 'Confirm identity'}
+        <Alert variant="info">{!error && !entry ? message : ''}</Alert>
+        <button
+          className="btn btn-primary"
+          disabled={busy || !secretCode.trim()}
+        >
+          {busy ? 'Checking…' : 'Confirm'}
         </button>
       </form>
 
@@ -46,74 +52,60 @@ export default function VerifyCodePanel({
         <div className="verify-result">
           <div className="verify-result-top">
             <div>
-              <p className="verify-result-kicker">Fresher confirmed</p>
               <h3>{student.full_name || '—'}</h3>
-              <p className="muted">{student.registration_number || '—'}</p>
+              <p className="verify-reg">{student.registration_number || '—'}</p>
             </div>
             <StatusPill status={entry.status} />
           </div>
 
           <div
             className={`verify-schedule${
-              verified.schedule_is_today ? ' is-today' : ' is-other'
+              canDecideToday ? ' is-today' : ' is-other'
             }`}
           >
-            <span className="label">Scheduled day</span>
+            <span className="label">Approval day</span>
             <strong>{entry.scheduled_date || 'Not assigned'}</strong>
             <p>{verified.schedule_note}</p>
           </div>
 
-          <div className="verify-grid">
+          <dl className="verify-facts">
             <div>
-              <span className="label">Queue number</span>
-              <strong>
-                {entry.position != null &&
-                entry.status !== 'waiting' &&
-                Number(entry.position) > 0
-                  ? `#${entry.position}`
-                  : 'Not assigned yet'}
-              </strong>
+              <dt>Faculty</dt>
+              <dd>{student.faculty || '—'}</dd>
             </div>
             <div>
-              <span className="label">Faculty</span>
-              <strong>{student.faculty || '—'}</strong>
+              <dt>Programme</dt>
+              <dd>{student.programme || '—'}</dd>
             </div>
-            <div>
-              <span className="label">Programme</span>
-              <strong>{student.programme || '—'}</strong>
-            </div>
-            <div>
-              <span className="label">Email</span>
-              <strong>{student.email || '—'}</strong>
-            </div>
-            <div>
-              <span className="label">Telephone</span>
-              <strong>{student.phone || '—'}</strong>
-            </div>
-            <div>
-              <span className="label">Secret code</span>
-              <strong>
-                <code>{entry.secret_code || secretCode}</code>
-              </strong>
-            </div>
-          </div>
+            {(entry.position != null &&
+              entry.status !== 'waiting' &&
+              Number(entry.position) > 0) ||
+            entry.secret_code ||
+            secretCode ? (
+              <div>
+                <dt>Queue #</dt>
+                <dd>
+                  {entry.position != null &&
+                  entry.status !== 'waiting' &&
+                  Number(entry.position) > 0
+                    ? `#${entry.position}`
+                    : '—'}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
 
-          <p className="muted verify-auto-leave">
-            Approve finishes the visit. Delete removes them from today’s queue.
-            Back to queue returns them to waiting for a later schedule.
-          </p>
-
-          <div className="cta-row">
+          <div className="cta-row verify-cta">
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => onComplete('approved')}
-              disabled={deskLocked || !verified?.schedule_is_today}
+              disabled={deskLocked || !canDecideToday}
               aria-busy={completeBusy === 'approved'}
               title={
-                verified?.schedule_is_today
-                  ? 'Accept documents and clear them from today’s queue'
-                  : 'Only students scheduled for today can be approved'
+                canDecideToday
+                  ? 'Accept documents and finish visit'
+                  : 'Only today’s schedule can be approved'
               }
             >
               {completeBusy === 'approved' ? 'Approving…' : 'Approve'}
@@ -122,12 +114,12 @@ export default function VerifyCodePanel({
               type="button"
               className="btn btn-danger-outline"
               onClick={() => onComplete('rejected')}
-              disabled={deskLocked || !verified?.schedule_is_today}
+              disabled={deskLocked || !canDecideToday}
               aria-busy={completeBusy === 'rejected'}
               title={
-                verified?.schedule_is_today
-                  ? 'Remove this fresher from today’s queue (documents not accepted)'
-                  : 'Only students scheduled for today can be deleted'
+                canDecideToday
+                  ? 'Remove from today’s queue'
+                  : 'Only today’s schedule can be deleted'
               }
             >
               {completeBusy === 'rejected' ? 'Deleting…' : 'Delete'}
@@ -138,7 +130,7 @@ export default function VerifyCodePanel({
               onClick={() => onComplete('back_to_queue')}
               disabled={deskLocked}
               aria-busy={completeBusy === 'back_to_queue'}
-              title="Return them to the waiting queue for a later schedule"
+              title="Return to waiting for a later day"
             >
               {completeBusy === 'back_to_queue' ? 'Returning…' : 'Back to queue'}
             </button>

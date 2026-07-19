@@ -43,7 +43,10 @@ export default function AdminDashboard() {
   const statusRef = useRef(status);
   const searchRef = useRef(searchApplied);
   const notifyResultRef = useRef(notifyResult);
+  const notifyZoneRef = useRef(null);
+  const verifyZoneRef = useRef(null);
   const batchZoneRef = useRef(null);
+  const queueZoneRef = useRef(null);
   const deliveryPollRef = useRef(0);
   statusRef.current = status;
   searchRef.current = searchApplied;
@@ -589,96 +592,138 @@ export default function AdminDashboard() {
 
   const stageHint =
     waitingCount > 0
-      ? `${waitingCount} unscheduled in queue`
+      ? `${waitingCount} waiting to schedule`
       : liveBatchOpen
-        ? 'Batch open · verify codes'
-        : 'Waiting for campus joiners';
+        ? 'Batch open — check in with codes'
+        : 'Idle · waiting for joiners';
+
+  const bannerError = pageError || queueError;
+  const bannerInfo = !bannerError
+    ? queueMessage || refreshNote || ''
+    : '';
+
+  function jumpTo(target) {
+    const map = {
+      notify: notifyZoneRef,
+      verify: verifyZoneRef,
+      batch: batchZoneRef,
+      queue: queueZoneRef,
+    };
+    const node = map[target]?.current;
+    node?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  const flowStep = verified
+    ? 'verify'
+    : liveBatchOpen
+      ? 'batch'
+      : waitingCount > 0
+        ? 'notify'
+        : 'idle';
 
   return (
     <section className="dash desk-dash kabque-ops">
-      <header className="desk-welcome">
+      <header className="desk-welcome desk-welcome-slim">
         <div className="desk-welcome-copy">
-          <p className="desk-welcome-kicker">Kabale University · Supervisor</p>
-          <h1>Desk control</h1>
+          <h1>Desk</h1>
           <p className="desk-welcome-lede">{stageHint}</p>
         </div>
         <div className="desk-welcome-actions">
           {lastSynced ? (
             <span className="dash-refreshed desk-live-pill">
               <span className="desk-live-dot" aria-hidden="true" />
-              {refreshing ? 'Refreshing…' : `Live · ${lastSynced.toLocaleTimeString()}`}
+              {refreshing ? 'Syncing…' : lastSynced.toLocaleTimeString()}
             </span>
           ) : null}
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn-secondary"
             onClick={() => load({ manual: true })}
             disabled={refreshing}
             aria-busy={refreshing}
           >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            {refreshing ? '…' : 'Refresh'}
           </button>
         </div>
       </header>
 
-      <Alert>{pageError}</Alert>
-      <Alert>{queueError}</Alert>
-      <Alert variant="info">
-        {!queueError ? queueMessage || refreshNote : ''}
-      </Alert>
+      <nav className="desk-flow" aria-label="Desk workflow">
+        <button
+          type="button"
+          className={`desk-flow-step${flowStep === 'notify' ? ' is-active' : ''}`}
+          onClick={() => jumpTo('notify')}
+        >
+          <span className="desk-flow-num">1</span>
+          Notify
+        </button>
+        <button
+          type="button"
+          className={`desk-flow-step${flowStep === 'verify' ? ' is-active' : ''}`}
+          onClick={() => jumpTo('verify')}
+        >
+          <span className="desk-flow-num">2</span>
+          Check in
+        </button>
+        <button
+          type="button"
+          className={`desk-flow-step${flowStep === 'batch' ? ' is-active' : ''}`}
+          onClick={() => jumpTo('batch')}
+        >
+          <span className="desk-flow-num">3</span>
+          Batch
+        </button>
+      </nav>
 
-      <AdminStats counts={dash?.counts} />
+      <Alert>{bannerError}</Alert>
+      <Alert variant="info">{bannerInfo}</Alert>
 
-      <section className="desk-zone" aria-labelledby="desk-ops-heading">
-        <header className="desk-zone-head">
-          <div>
-            <p className="desk-zone-kicker">Operations</p>
-            <h2 id="desk-ops-heading">Schedule & verify</h2>
-          </div>
-        </header>
+      <AdminStats counts={dash?.counts} onJump={jumpTo} />
+
+      <section
+        className="desk-zone desk-zone-ops"
+        aria-label="Notify and check in"
+      >
         <div className="admin-grid">
-          <NotifyBatchForm
-            batchSize={batchSize}
-            scheduledDate={scheduledDate}
-            channel={channel}
-            busy={notifyBusy}
-            remaining={waitingCount}
-            leftovers={leftoversCount}
-            error={notifyError}
-            message={notifyMessage}
-            onBatchSizeChange={setBatchSize}
-            onScheduledDateChange={setScheduledDate}
-            onChannelChange={setChannel}
-            onSubmit={notifyBatch}
-          />
-          <VerifyCodePanel
-            secretCode={secretCode}
-            verified={verified}
-            busy={verifyBusy}
-            completeBusy={completeBusy}
-            error={verifyError}
-            message={verifyMessage}
-            onSecretCodeChange={(value) => {
-              setSecretCode(value);
-              if (verifyError) setVerifyError('');
-            }}
-            onVerify={verifyCode}
-            onComplete={complete}
-          />
+          <div ref={notifyZoneRef} className="desk-anchor">
+            <NotifyBatchForm
+              batchSize={batchSize}
+              scheduledDate={scheduledDate}
+              channel={channel}
+              busy={notifyBusy}
+              remaining={waitingCount}
+              leftovers={leftoversCount}
+              error={notifyError}
+              message={notifyMessage}
+              onBatchSizeChange={setBatchSize}
+              onScheduledDateChange={setScheduledDate}
+              onChannelChange={setChannel}
+              onSubmit={notifyBatch}
+            />
+          </div>
+          <div ref={verifyZoneRef} className="desk-anchor">
+            <VerifyCodePanel
+              secretCode={secretCode}
+              verified={verified}
+              busy={verifyBusy}
+              completeBusy={completeBusy}
+              error={verifyError}
+              message={verifyMessage}
+              onSecretCodeChange={(value) => {
+                setSecretCode(value);
+                if (verifyError) setVerifyError('');
+              }}
+              onVerify={verifyCode}
+              onComplete={complete}
+            />
+          </div>
         </div>
       </section>
 
       <section
         className="desk-zone"
-        aria-labelledby="desk-batch-heading"
+        aria-label="Active batch"
         ref={batchZoneRef}
       >
-        <header className="desk-zone-head">
-          <div>
-            <p className="desk-zone-kicker">Today</p>
-            <h2 id="desk-batch-heading">Batch results</h2>
-          </div>
-        </header>
         <BatchResultTable
           result={notifyResult}
           onBatchReschedule={batchReschedule}
@@ -690,13 +735,7 @@ export default function AdminDashboard() {
         />
       </section>
 
-      <section className="desk-zone" aria-labelledby="desk-queue-heading">
-        <header className="desk-zone-head">
-          <div>
-            <p className="desk-zone-kicker">Queue</p>
-            <h2 id="desk-queue-heading">Waiting students</h2>
-          </div>
-        </header>
+      <section className="desk-zone" aria-label="Browse queue" ref={queueZoneRef}>
         <QueueTable
           queue={queue}
           status={status}
@@ -708,19 +747,19 @@ export default function AdminDashboard() {
         />
       </section>
 
-      <section className="desk-zone desk-zone-insight" aria-labelledby="desk-insight-heading">
+      <section
+        className="desk-zone desk-zone-insight"
+        aria-labelledby="desk-insight-heading"
+      >
         <header className="desk-zone-head desk-zone-head-insight">
-          <div>
-            <p className="desk-zone-kicker">Insights</p>
-            <h2 id="desk-insight-heading">Faculty & programme breakdown</h2>
-          </div>
+          <h2 id="desk-insight-heading">Faculty breakdown</h2>
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-ghost"
             onClick={() => setShowBreakdown((v) => !v)}
             aria-expanded={showBreakdown}
           >
-            {showBreakdown ? 'Hide breakdown' : 'Show breakdown'}
+            {showBreakdown ? 'Hide' : 'Show'}
           </button>
         </header>
         {showBreakdown ? (
@@ -729,12 +768,7 @@ export default function AdminDashboard() {
             byProgramme={dash?.by_programme}
             totalInQueue={dash?.counts?.total ?? 0}
           />
-        ) : (
-          <p className="desk-zone-lede desk-zone-lede-muted">
-            Optional overview of who is in the live queue by faculty and
-            programme. Open when you need reporting — not during desk rush.
-          </p>
-        )}
+        ) : null}
       </section>
     </section>
   );

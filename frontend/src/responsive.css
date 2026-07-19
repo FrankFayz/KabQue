@@ -44,6 +44,14 @@
     justify-content: flex-end;
   }
 
+  .desk-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .desk-flow {
+    grid-template-columns: 1fr;
+  }
+
   .admin-grid,
   .analytics-grid,
   .stat-row,
