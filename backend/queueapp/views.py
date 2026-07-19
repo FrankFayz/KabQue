@@ -1218,14 +1218,10 @@ class LoginView(APIView):
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             # Main Admin must NEVER sign in with email alone — always Kabale email + #@admin@#
+            # Use generic invalid-login text so the marker is never disclosed in the browser.
             if user.is_main_admin or username_is_main_admin(user.username):
                 return Response(
-                    {
-                        "detail": (
-                            "Main Admin must sign in with your Kabale email followed by "
-                            "#@admin@# (example: name@kab.ac.ug#@admin@#), not the email alone."
-                        )
-                    },
+                    {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
             if user.role != User.Role.ADMIN and not user.is_staff:
