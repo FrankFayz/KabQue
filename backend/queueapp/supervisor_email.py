@@ -11,7 +11,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .notifications import send_email_notification
+from .email_async import send_email_in_background
 
 CODE_TTL_MINUTES = 30
 RESEND_COOLDOWN_SECONDS = 60
@@ -37,8 +37,9 @@ def _clear_password_reset_side(user) -> list[str]:
 
 def issue_email_verification_code(user) -> tuple[str, str | None]:
     """
-    Create a fresh signup verification code, store it, and email it.
-    Returns (code, send_error). send_error is None when delivery succeeded.
+    Create a fresh signup verification code, store it, and email it in the background.
+    Returns (code, send_error). send_error is always None — delivery is async so the
+    HTTP response is not blocked on Brevo.
     """
     code = generate_email_code()
     user.email_verification_code = code
@@ -80,8 +81,8 @@ def issue_email_verification_code(user) -> tuple[str, str | None]:
             f"— KabQue / Kabale University"
         )
 
-    ok, err = send_email_notification(user.email, subject, body)
-    return code, (None if ok else (err or "Could not send verification email"))
+    send_email_in_background(user.email, subject, body)
+    return code, None
 
 
 # Backwards-compatible alias used by existing call sites

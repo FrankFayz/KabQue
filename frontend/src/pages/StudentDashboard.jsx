@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
 import { api, getStoredUser, setAuth } from '../api';
 import CompleteProfileCard from '../components/student/CompleteProfileCard';
 import DeskOutcomeCard from '../components/student/DeskOutcomeCard';
@@ -34,7 +34,6 @@ function StudentDashboard() {
   const [actionBusy, setActionBusy] = useState(false);
   const [showRejoinHint, setShowRejoinHint] = useState(false);
   const [booted, setBooted] = useState(false);
-  const meLoaded = useRef(false);
 
   const applyQueuePayload = useCallback((data) => {
     const complete = Boolean(data?.profile_complete ?? data?.profile?.profile_complete);
@@ -67,9 +66,10 @@ function StudentDashboard() {
       setError('');
 
       try {
-        if (includeMe || !meLoaded.current) {
+        // Prefer one round-trip: /student/queue already returns profile fields.
+        // Only hit /auth/me when explicitly requested.
+        if (includeMe) {
           const me = await api('/auth/me/');
-          meLoaded.current = true;
           if (me?.user) {
             setUser(me.user);
             setAuth({ user: me.user });
@@ -119,7 +119,8 @@ function StudentDashboard() {
   );
 
   useEffect(() => {
-    load({ manual: false, includeMe: true });
+    // Skip /auth/me on boot — login already stored the user; queue covers profile.
+    load({ manual: false, includeMe: false });
     const tick = () => {
       if (document.hidden) return;
       load({ manual: false, includeMe: false });
@@ -144,7 +145,6 @@ function StudentDashboard() {
     if (data?.profile) setProfile(data.profile);
     setProfileComplete(true);
     setInfo(data?.message || 'Profile saved.');
-    meLoaded.current = true;
     await load({ manual: true, includeMe: false });
   }
 

@@ -1,7 +1,7 @@
 from datetime import timedelta
 import threading
 
-from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.db import close_old_connections, transaction
 from django.db.models import Count, Q
@@ -77,6 +77,20 @@ ACCOUNT_LOCKED_MESSAGE = (
 INVALID_LOGIN_MESSAGE = (
     "That account or password does not match. Check and try again."
 )
+
+
+def _authenticate_user(user_obj, password: str):
+    """
+    Verify password against an already-loaded user (skips ModelBackend’s
+    second DB fetch that django.contrib.auth.authenticate performs).
+    """
+    if user_obj is None or not password:
+        return None
+    if not user_obj.is_active:
+        return None
+    if not user_obj.check_password(password):
+        return None
+    return user_obj
 
 
 def _reject_if_locked(user_obj, password):
@@ -1171,7 +1185,7 @@ class LoginView(APIView):
             locked = _reject_if_locked(user_obj, password)
             if locked:
                 return locked
-            user = authenticate(username=user_obj.username, password=password)
+            user = _authenticate_user(user_obj, password)
             if user is None or not user.is_main_admin:
                 return Response(
                     {"detail": INVALID_LOGIN_MESSAGE},
@@ -1211,7 +1225,7 @@ class LoginView(APIView):
             locked = _reject_if_locked(user_obj, password)
             if locked:
                 return locked
-            user = authenticate(username=user_obj.username, password=password)
+            user = _authenticate_user(user_obj, password)
             if user is None:
                 return Response(
                     {"detail": INVALID_LOGIN_MESSAGE},
@@ -1269,7 +1283,7 @@ class LoginView(APIView):
             locked = _reject_if_locked(profile.user, password)
             if locked:
                 return locked
-            user = authenticate(username=profile.user.username, password=password)
+            user = _authenticate_user(profile.user, password)
             if user is None:
                 return Response(
                     {"detail": INVALID_LOGIN_MESSAGE},
@@ -1280,16 +1294,13 @@ class LoginView(APIView):
                     {"detail": INVALID_LOGIN_MESSAGE},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
+            # Cache reverse OneToOne so tokens_for_user does not re-query profile.
+            user.__dict__["profile"] = profile
 
+        # Tokens only — queue status loads on the dashboard (one less Neon round-trip here).
         data = tokens_for_user(user)
         if hasattr(user, "profile"):
-            entry = get_queue_entry(user.profile)
-            data["in_queue"] = entry is not None
             data["profile_complete"] = user.profile.is_profile_complete
-            if entry:
-                data["queue"] = QueueEntrySerializer(
-                    entry, context={"request": request}
-                ).data
         return Response(data)
 
 

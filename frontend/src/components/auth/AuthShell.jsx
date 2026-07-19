@@ -1,10 +1,16 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { warmApi } from '../../api';
 import AuthShowcase from './AuthShowcase';
 
 export default function AuthShell() {
   const { pathname } = useLocation();
   const onLogin = pathname.includes('login');
   const onRegister = pathname.includes('register');
+
+  useEffect(() => {
+    warmApi();
+  }, []);
 
   return (
     <div className="auth-shell kabque-auth">

@@ -156,7 +156,7 @@ def _send_via_brevo(to_email: str, subject: str, body: str) -> tuple[bool, str]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             logger.info(
                 "Brevo accepted email to %s from %s (HTTP %s)",

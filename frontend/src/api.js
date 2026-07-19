@@ -44,6 +44,19 @@ export function getStoredUser() {
   }
 }
 
+/** Fire-and-forget wake-up for Render free dynos while the user is on the auth pages. */
+let _warmStarted = false;
+export function warmApi() {
+  if (_warmStarted) return;
+  _warmStarted = true;
+  const base = API_URL.replace(/\/api\/?$/, '');
+  const healthUrl = `${base}/`;
+  // Ignore result — purpose is only to start the backend / DB.
+  fetch(healthUrl, { method: 'GET', cache: 'no-store', mode: 'cors' }).catch(
+    () => {}
+  );
+}
+
 let refreshPromise = null;
 
 async function refreshAccessToken() {

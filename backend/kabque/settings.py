@@ -73,6 +73,8 @@ def _database_from_url(url: str) -> dict:
     options = {}
     if "sslmode" in qs:
         options["sslmode"] = qs["sslmode"][0]
+    # Reuse connections across requests (Neon SSL handshake is expensive each time).
+    conn_max_age = int(os.getenv("DB_CONN_MAX_AGE", "60"))
     return {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": (parsed.path or "/").lstrip("/") or "neondb",
@@ -81,6 +83,8 @@ def _database_from_url(url: str) -> dict:
         "HOST": parsed.hostname or "",
         "PORT": str(parsed.port or 5432),
         "OPTIONS": options,
+        "CONN_MAX_AGE": max(0, conn_max_age),
+        "CONN_HEALTH_CHECKS": True,
     }
 
 

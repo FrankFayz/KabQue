@@ -18,8 +18,8 @@ from .auth_utils import (
     parse_main_admin_identifier,
     username_is_main_admin,
 )
+from .email_async import send_email_in_background
 from .models import StudentProfile
-from .notifications import send_email_notification
 
 User = get_user_model()
 
@@ -148,9 +148,7 @@ def issue_password_reset_code(user, destination_email: str) -> tuple[bool, str]:
         f"the same.\n\n"
         f"— KabQue / Kabale University"
     )
-    ok, err = send_email_notification(destination_email, subject, body)
-    if not ok:
-        return False, err or "Could not send reset email"
+    send_email_in_background(destination_email, subject, body)
     return True, ""
 
 
