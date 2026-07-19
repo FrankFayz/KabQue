@@ -345,13 +345,26 @@ export default function BatchResultTable({
         </div>
         <div className="batch-stat">
           <span className="label">Emails sent</span>
-          <strong>{result.emails_sent ?? 0}</strong>
+          <strong>
+            {result.delivery_pending
+              ? `${result.emails_sent ?? 0}…`
+              : (result.emails_sent ?? 0)}
+          </strong>
         </div>
         <div className="batch-stat">
           <span className="label">SMS sent</span>
-          <strong>{result.sms_sent ?? 0}</strong>
+          <strong>
+            {result.delivery_pending
+              ? `${result.sms_sent ?? 0}…`
+              : (result.sms_sent ?? 0)}
+          </strong>
         </div>
       </div>
+      {result.delivery_pending ? (
+        <p className="hint batch-delivery-hint">
+          Confirming email and SMS delivery — totals update as messages go out.
+        </p>
+      ) : null}
 
       {remaining === 0 ? (
         <p className="batch-empty-note">

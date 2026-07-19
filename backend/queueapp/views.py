@@ -461,11 +461,47 @@ def serialize_batch_student(entry, *, channels=None):
     }
 
 
+def batch_delivery_stats(batch) -> dict:
+    """
+    Live email/SMS totals for a batch, derived from NotificationLog rows.
+
+    delivery_pending stays True while any placeholder “pending” membership
+    rows remain (background Brevo / MySMSGate still in flight).
+    """
+    batch_id = batch.id if hasattr(batch, "id") else batch
+    pending_n = NotificationLog.objects.filter(
+        batch_id=batch_id, channel=BATCH_MEMBERSHIP_CHANNEL
+    ).count()
+    real = NotificationLog.objects.filter(batch_id=batch_id).exclude(
+        channel=BATCH_MEMBERSHIP_CHANNEL
+    )
+    emails_sent = real.filter(channel="email", success=True).count()
+    emails_failed = real.filter(channel="email", success=False).count()
+    sms_sent = real.filter(channel="sms", success=True).count()
+    sms_failed = real.filter(channel="sms", success=False).count()
+    sms_errors = list(
+        real.filter(channel="sms", success=False)
+        .exclude(error_message="")
+        .order_by("-id")
+        .values_list("error_message", flat=True)[:5]
+    )
+    return {
+        "emails_sent": emails_sent,
+        "emails_failed": emails_failed,
+        "sms_sent": sms_sent,
+        "sms_failed": sms_failed,
+        "sms_errors": sms_errors,
+        "delivery_pending": pending_n > 0,
+        "delivery_pending_count": pending_n,
+    }
+
+
 def build_live_batch_payload(batch, *, message=None, rescheduled=False, extras=None):
     students = [serialize_batch_student(e) for e in live_batch_entries(batch.id)]
     remaining_waiting = QueueEntry.objects.filter(
         status=QueueEntry.Status.WAITING
     ).count()
+    stats = batch_delivery_stats(batch)
     payload = {
         "batch": NotificationBatchSerializer(batch).data,
         "channel": normalize_notify_channel(getattr(batch, "channel", None) or "both"),
@@ -478,11 +514,12 @@ def build_live_batch_payload(batch, *, message=None, rescheduled=False, extras=N
         "requested": batch.batch_size,
         "available": len(students),
         "notified_count": len(students),
-        "emails_sent": 0,
-        "emails_failed": 0,
-        "sms_sent": 0,
-        "sms_failed": 0,
-        "sms_errors": [],
+        "emails_sent": stats["emails_sent"],
+        "emails_failed": stats["emails_failed"],
+        "sms_sent": stats["sms_sent"],
+        "sms_failed": stats["sms_failed"],
+        "sms_errors": stats["sms_errors"],
+        "delivery_pending": stats["delivery_pending"],
         "shortage": False,
         "remaining": remaining_waiting,
         "students": students,
@@ -491,6 +528,10 @@ def build_live_batch_payload(batch, *, message=None, rescheduled=False, extras=N
     }
     if extras:
         payload.update(extras)
+        # If caller forced delivery_pending, refresh counts from DB still.
+        if "emails_sent" not in (extras or {}):
+            payload["emails_sent"] = stats["emails_sent"]
+            payload["sms_sent"] = stats["sms_sent"]
     return payload
 
 
@@ -731,26 +772,61 @@ def _deliver_prepared_notices(*, batch_id, prepared_items, scheduled_date, chann
                     position=item["number"],
                     channels_tried=channels_tried,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 logger.exception(
-                    "Delivery failed for queue_entry=%s batch=%s — membership kept",
+                    "Delivery failed for queue_entry=%s batch=%s",
                     item.get("entry_id"),
                     batch_id,
                 )
-                # Re-assert membership so soft-refresh never orphans this student.
+                # Record failure logs so counts finalize (not stuck on “pending”).
                 try:
-                    entry = QueueEntry.objects.filter(pk=item["entry_id"]).first()
+                    entry = (
+                        QueueEntry.objects.select_related("student", "student__user")
+                        .filter(pk=item["entry_id"])
+                        .first()
+                    )
                     if entry is not None:
-                        ensure_batch_membership(
-                            batch,
-                            entry,
-                            scheduled_date=scheduled_date,
-                            code=item.get("code") or entry.secret_code or "",
-                            position=item.get("number") or entry.position,
-                        )
+                        err = str(exc)[:160] or "Delivery failed"
+                        mode = normalize_notify_channel(channel)
+                        failed = []
+                        if mode in ("email", "both"):
+                            failed.append(
+                                {
+                                    "channel": "email",
+                                    "destination": "",
+                                    "success": False,
+                                    "error": err,
+                                }
+                            )
+                        if mode in ("sms", "both"):
+                            failed.append(
+                                {
+                                    "channel": "sms",
+                                    "destination": "",
+                                    "success": False,
+                                    "error": err,
+                                }
+                            )
+                        if failed:
+                            log_delivery_attempts(
+                                batch,
+                                entry,
+                                scheduled_date=scheduled_date,
+                                code=item.get("code") or entry.secret_code or "",
+                                position=item.get("number") or entry.position,
+                                channels_tried=failed,
+                            )
+                        else:
+                            ensure_batch_membership(
+                                batch,
+                                entry,
+                                scheduled_date=scheduled_date,
+                                code=item.get("code") or entry.secret_code or "",
+                                position=item.get("number") or entry.position,
+                            )
                 except Exception:  # noqa: BLE001
                     logger.exception(
-                        "Could not re-link queue_entry=%s to batch=%s",
+                        "Could not record delivery failure for queue_entry=%s batch=%s",
                         item.get("entry_id"),
                         batch_id,
                     )
@@ -2043,12 +2119,7 @@ class NotifyBatchView(APIView):
                 "from_waiting": max(0, len(results) - carried_count),
                 "notified_count": len(results),
                 "channel": channel,
-                "emails_sent": 0,
-                "emails_failed": 0,
-                "sms_sent": 0,
-                "sms_failed": 0,
-                "sms_errors": [],
-                "delivery_pending": True,
+                **batch_delivery_stats(batch),
                 "email_configured": configured["email_configured"],
                 "sms_configured": configured["sms_configured"],
                 "shortage": shortage,
@@ -2441,12 +2512,12 @@ class AdminRescheduleView(APIView):
                 "secret_code": code,
                 "channel": channel,
                 "channels": [],
-                "delivery_pending": True,
                 "entry": AdminQueueEntrySerializer(entry).data,
                 "batch": NotificationBatchSerializer(new_batch).data,
                 "students": results,
                 "remaining_in_batch": len(results),
                 "rescheduled": True,
+                **batch_delivery_stats(new_batch),
             }
         )
 
@@ -2643,12 +2714,7 @@ class AdminBatchRescheduleView(APIView):
                 "notified_count": len(results),
                 "remaining_in_batch": len(results),
                 "channel": channel,
-                "emails_sent": 0,
-                "emails_failed": 0,
-                "sms_sent": 0,
-                "sms_failed": 0,
-                "sms_errors": [],
-                "delivery_pending": True,
+                **batch_delivery_stats(new_batch),
                 "email_configured": configured["email_configured"],
                 "sms_configured": configured["sms_configured"],
                 "shortage": shortage,

@@ -44,6 +44,7 @@ export default function AdminDashboard() {
   const searchRef = useRef(searchApplied);
   const notifyResultRef = useRef(notifyResult);
   const batchZoneRef = useRef(null);
+  const deliveryPollRef = useRef(0);
   statusRef.current = status;
   searchRef.current = searchApplied;
   notifyResultRef.current = notifyResult;
@@ -63,34 +64,116 @@ export default function AdminDashboard() {
     return () => clearTimeout(id);
   }, [search]);
 
-  const applyBatchPayload = useCallback((data) => {
-    if (!data?.batch) return;
-    if (Array.isArray(data.students) && data.students.length > 0) {
-      setNotifyResult(data);
-      return;
+  const mergeDeliveryStats = useCallback((prev, data) => {
+    if (!data) return prev;
+    if (!prev) return data;
+    if (prev.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
+      return data;
     }
-    setNotifyResult((prev) => {
-      // Never wipe a freshly notified/rescheduled table while delivery is pending
-      // or the poll has briefly returned empty before membership settles.
-      if (
-        prev?.students?.length > 0 &&
-        data.batch?.id &&
-        prev.batch?.id === data.batch.id &&
-        (prev.delivery_pending || prev.rescheduled)
-      ) {
-        return prev;
-      }
-      if (prev?.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
-        return prev;
-      }
-      return {
-        ...data,
-        message:
-          data.message ||
-          'No students remain in this batch (approved students leave the table).',
-      };
-    });
+    const students =
+      Array.isArray(data.students) && data.students.length > 0
+        ? data.students
+        : prev.students;
+    return {
+      ...prev,
+      ...data,
+      students,
+      emails_sent: data.emails_sent ?? prev.emails_sent ?? 0,
+      emails_failed: data.emails_failed ?? prev.emails_failed ?? 0,
+      sms_sent: data.sms_sent ?? prev.sms_sent ?? 0,
+      sms_failed: data.sms_failed ?? prev.sms_failed ?? 0,
+      sms_errors: data.sms_errors ?? prev.sms_errors ?? [],
+      delivery_pending: Boolean(data.delivery_pending),
+      remaining_in_batch:
+        data.remaining_in_batch ??
+        (Array.isArray(students) ? students.length : prev.remaining_in_batch),
+    };
   }, []);
+
+  const applyBatchPayload = useCallback(
+    (data) => {
+      if (!data?.batch) return;
+      setNotifyResult((prev) => {
+        if (Array.isArray(data.students) && data.students.length > 0) {
+          return mergeDeliveryStats(prev, data);
+        }
+        // Same batch with empty students: keep rows, still refresh email/SMS totals.
+        if (
+          prev?.students?.length > 0 &&
+          data.batch?.id &&
+          prev.batch?.id === data.batch.id
+        ) {
+          return mergeDeliveryStats(prev, {
+            ...data,
+            students: prev.students,
+          });
+        }
+        if (prev?.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
+          return prev;
+        }
+        return {
+          ...data,
+          message:
+            data.message ||
+            'No students remain in this batch (approved students leave the table).',
+        };
+      });
+    },
+    [mergeDeliveryStats]
+  );
+
+  /** Poll until background email/SMS finish so Emails sent / SMS sent stay accurate. */
+  const pollBatchDelivery = useCallback(
+    async (batchId, { onTick, onDone } = {}) => {
+      if (!batchId) return null;
+      const token = ++deliveryPollRef.current;
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      let last = null;
+      for (let i = 0; i < 50; i += 1) {
+        if (token !== deliveryPollRef.current) return last;
+        await sleep(i === 0 ? 700 : 1400);
+        try {
+          const data = await api(
+            `/admin/batch/active/?batch_id=${batchId}&_=${Date.now()}`
+          );
+          if (token !== deliveryPollRef.current) return last;
+          if (!data?.batch) continue;
+          last = data;
+          setNotifyResult((prev) => mergeDeliveryStats(prev, data));
+          notifyResultRef.current = mergeDeliveryStats(
+            notifyResultRef.current,
+            data
+          );
+          onTick?.(data);
+          if (!data.delivery_pending) {
+            onDone?.(data);
+            return data;
+          }
+        } catch {
+          // Keep polling through transient network blips.
+        }
+      }
+      onDone?.(last);
+      return last;
+    },
+    [mergeDeliveryStats]
+  );
+
+  function deliverySummaryMessage(data, fallback) {
+    if (!data) return fallback;
+    const mode = data.channel || channel;
+    const bits = [];
+    if (mode === 'email' || mode === 'both') {
+      bits.push(`Emails sent ${data.emails_sent ?? 0}`);
+      if (data.emails_failed) bits.push(`email failed ${data.emails_failed}`);
+    }
+    if (mode === 'sms' || mode === 'both') {
+      bits.push(`SMS sent ${data.sms_sent ?? 0}`);
+      if (data.sms_failed) bits.push(`SMS failed ${data.sms_failed}`);
+    }
+    if (!bits.length) return fallback;
+    return `${fallback} · ${bits.join(' · ')}`;
+  }
 
   const load = useCallback(async ({ manual = false, lite = false } = {}) => {
     const seq = ++loadSeq.current;
@@ -218,8 +301,18 @@ export default function AdminDashboard() {
       if (data.delivery_pending) {
         setNotifyMessage(
           data.message ||
-            `Batch ready (${mode}) · notified ${data.notified_count}. Sending email/SMS in the background.`
+            `Batch ready (${mode}) · notified ${data.notified_count}. Confirming email/SMS…`
         );
+        void pollBatchDelivery(data.batch?.id, {
+          onDone: (final) => {
+            setNotifyMessage(
+              deliverySummaryMessage(
+                final,
+                `Batch complete (${mode}) · notified ${final?.notified_count ?? data.notified_count}`
+              )
+            );
+          },
+        });
       } else if (data.sms_failed && (mode === 'sms' || mode === 'both')) {
         const reason = Array.isArray(data.sms_errors) && data.sms_errors.length
           ? ` Reason: ${data.sms_errors[0]}`
@@ -230,14 +323,12 @@ export default function AdminDashboard() {
           `Batch sent (${mode}). Emails: ${data.emails_sent ?? 0}. SMS failed for ${data.sms_failed} student(s).${reason}`
         );
       } else {
-        const bits = [`Batch sent (${mode})`, `notified ${data.notified_count}`];
-        if (mode === 'email' || mode === 'both') {
-          bits.push(`emails ${data.emails_sent ?? 0}`);
-        }
-        if (mode === 'sms' || mode === 'both') {
-          bits.push(`SMS ${data.sms_sent ?? 0}`);
-        }
-        setNotifyMessage(bits.join(' · '));
+        setNotifyMessage(
+          deliverySummaryMessage(
+            data,
+            `Batch sent (${mode}) · notified ${data.notified_count}`
+          )
+        );
       }
       if (data.shortage) {
         setNotifyError(
@@ -411,7 +502,7 @@ export default function AdminDashboard() {
           ...data,
           batch: data.batch,
           students: Array.isArray(data.students) ? data.students : [],
-          delivery_pending: true,
+          delivery_pending: data.delivery_pending !== false,
           rescheduled: true,
           remaining_in_batch:
             data.remaining_in_batch ??
@@ -419,6 +510,18 @@ export default function AdminDashboard() {
         };
         setNotifyResult(payload);
         notifyResultRef.current = payload;
+        if (payload.delivery_pending && payload.batch?.id) {
+          void pollBatchDelivery(payload.batch.id, {
+            onDone: (final) => {
+              setRescheduleMessage(
+                deliverySummaryMessage(
+                  final,
+                  data.message || 'Student rescheduled.'
+                )
+              );
+            },
+          });
+        }
       }
       softRefresh();
     } catch (err) {
@@ -445,7 +548,11 @@ export default function AdminDashboard() {
       });
       setNotifyResult(data);
       notifyResultRef.current = data;
-      setRescheduleMessage(data.message || 'Batch rescheduled.');
+      setRescheduleMessage(
+        data.delivery_pending
+          ? `${data.message || 'Batch rescheduled.'} Confirming email/SMS…`
+          : deliverySummaryMessage(data, data.message || 'Batch rescheduled.')
+      );
       if (data.remaining != null) {
         setDash((prev) => {
           if (!prev?.counts) return prev;
@@ -461,6 +568,18 @@ export default function AdminDashboard() {
               total: waiting,
             },
           };
+        });
+      }
+      if (data.delivery_pending !== false && data.batch?.id) {
+        void pollBatchDelivery(data.batch.id, {
+          onDone: (final) => {
+            setRescheduleMessage(
+              deliverySummaryMessage(
+                final,
+                data.message || 'Batch rescheduled.'
+              )
+            );
+          },
         });
       }
       softRefresh();
