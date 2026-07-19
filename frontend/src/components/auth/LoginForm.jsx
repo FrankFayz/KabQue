@@ -163,8 +163,7 @@ export default function LoginForm() {
         <p className="auth-form-eyebrow">Welcome back</p>
         <h1>Sign in</h1>
         <p className="auth-form-lead">
-          Freshers use a registration number. Staff use their @kab.ac.ug email.
-          Main Admin must use email plus #@admin@#.
+          Enter your KabQue account and password.
         </p>
       </header>
 
@@ -176,7 +175,7 @@ export default function LoginForm() {
         <input
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="Reg no. · name@kab.ac.ug · name@kab.ac.ug#@admin@#"
+          placeholder="Enter REGISTRATION NUMBER"
           autoComplete="username"
           required
           spellCheck={false}

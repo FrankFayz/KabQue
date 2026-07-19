@@ -164,8 +164,7 @@ export default function RegisterForm() {
         <p className="auth-form-eyebrow">Join KabQue</p>
         <h1>Create account</h1>
         <p className="auth-form-lead">
-          Freshers use a registration number. Supervisors use @kab.ac.ug.
-          Main Admin must register as name@kab.ac.ug#@admin@#.
+          Use the registration number on your admission letter.
         </p>
       </header>
 
@@ -177,7 +176,7 @@ export default function RegisterForm() {
         <input
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="Reg no. · name@kab.ac.ug · name@kab.ac.ug#@admin@#"
+          placeholder="Enter REGISTRATION NUMBER"
           autoComplete="username"
           required
           spellCheck={false}
