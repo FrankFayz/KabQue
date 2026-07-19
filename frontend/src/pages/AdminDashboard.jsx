@@ -70,6 +70,16 @@ export default function AdminDashboard() {
       return;
     }
     setNotifyResult((prev) => {
+      // Never wipe a freshly notified/rescheduled table while delivery is pending
+      // or the poll has briefly returned empty before membership settles.
+      if (
+        prev?.students?.length > 0 &&
+        data.batch?.id &&
+        prev.batch?.id === data.batch.id &&
+        (prev.delivery_pending || prev.rescheduled)
+      ) {
+        return prev;
+      }
       if (prev?.batch?.id && data.batch?.id && prev.batch.id !== data.batch.id) {
         return prev;
       }
@@ -396,9 +406,19 @@ export default function AdminDashboard() {
       });
       setQueueMessage(data.message || 'Rescheduled.');
       setRescheduleMessage(data.message || 'Student rescheduled.');
-      if (data.batch) {
-        setNotifyResult(data.batch);
-        notifyResultRef.current = data.batch;
+      if (data.batch || Array.isArray(data.students)) {
+        const payload = {
+          ...data,
+          batch: data.batch,
+          students: Array.isArray(data.students) ? data.students : [],
+          delivery_pending: true,
+          rescheduled: true,
+          remaining_in_batch:
+            data.remaining_in_batch ??
+            (Array.isArray(data.students) ? data.students.length : 0),
+        };
+        setNotifyResult(payload);
+        notifyResultRef.current = payload;
       }
       softRefresh();
     } catch (err) {

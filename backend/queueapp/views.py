@@ -1,4 +1,5 @@
 from datetime import timedelta
+import logging
 import threading
 
 from django.contrib.auth import get_user_model
@@ -20,6 +21,9 @@ from .notifications import (
     required_documents_payload,
     resolve_student_contacts,
 )
+
+logger = logging.getLogger(__name__)
+
 from .auth_utils import (
     is_kab_university_email,
     normalize_email,
@@ -217,6 +221,10 @@ ACTIVE_BATCH_STATUSES = (
     QueueEntry.Status.SKIPPED,
 )
 
+# Placeholder NotificationLog channel: keeps a student visible in the batch table
+# until email/SMS delivery records replace it.
+BATCH_MEMBERSHIP_CHANNEL = "pending"
+
 
 def detach_entry_from_batches(entry):
     """Drop batch-table links so finalized / deferred students leave the batch view."""
@@ -232,6 +240,42 @@ def detach_entries_from_batch(batch_id, entry_ids):
     NotificationLog.objects.filter(
         batch_id=batch_id, queue_entry_id__in=list(entry_ids)
     ).update(queue_entry=None)
+
+
+def ensure_batch_membership(
+    batch,
+    entry,
+    *,
+    scheduled_date,
+    code,
+    position,
+):
+    """
+    Link a student to a batch inside the same DB transaction as notify/reschedule.
+
+    Visibility in “Awaiting desk approval” depends on NotificationLog.queue_entry.
+    Creating this row immediately (before Brevo/MySMSGate) prevents students from
+    vanishing when delivery is async or when soft-refresh runs early.
+    """
+    NotificationLog.ensure_nullable_queue_entry()
+    if NotificationLog.objects.filter(batch=batch, queue_entry_id=entry.id).exists():
+        return
+    body = build_approval_message(
+        full_name=entry.student.full_name,
+        registration_number=entry.student.registration_number,
+        scheduled_date=scheduled_date,
+        secret_code=code or entry.secret_code or "",
+        position=position,
+    )
+    NotificationLog.objects.create(
+        batch=batch,
+        queue_entry=entry,
+        channel=BATCH_MEMBERSHIP_CHANNEL,
+        destination="",
+        body=body,
+        success=False,
+        error_message="Delivery queued",
+    )
 
 
 def live_batch_entries(batch_id):
@@ -257,6 +301,103 @@ def live_batch_entries(batch_id):
         if entry.status in ACTIVE_BATCH_STATUSES:
             entries.append(entry)
     return entries
+
+
+def repair_orphaned_batch_entries(*, created_by=None) -> dict:
+    """
+    Heal students left NOTIFIED/checked_in/skipped with no batch membership
+    (detach-before-delivery bug). Re-link them and re-queue email/SMS once.
+
+    Returns {repaired, batch_id} for desk messaging.
+    """
+    linked_ids = (
+        NotificationLog.objects.filter(queue_entry__isnull=False)
+        .values_list("queue_entry_id", flat=True)
+        .distinct()
+    )
+    orphans = list(
+        QueueEntry.objects.filter(status__in=ACTIVE_BATCH_STATUSES)
+        .exclude(id__in=linked_ids)
+        .select_related("student", "student__user")
+        .order_by("scheduled_date", "position", "id")
+    )
+    if not orphans:
+        return {"repaired": 0, "batch_id": None}
+
+    # Prefer the date already on the orphaned rows; fall back to today.
+    today = timezone.localdate()
+    scheduled_date = orphans[0].scheduled_date or today
+    # If mixed dates, use the first orphan's date; others still get a link + notice.
+    channel = "both"
+    prepared = []
+    new_batch_id = None
+
+    with transaction.atomic():
+        # Re-lock after the outer scan (status may have changed).
+        locked = list(
+            QueueEntry.objects.select_for_update()
+            .select_related("student", "student__user")
+            .filter(
+                pk__in=[o.id for o in orphans],
+                status__in=ACTIVE_BATCH_STATUSES,
+            )
+            .exclude(
+                id__in=NotificationLog.objects.filter(
+                    queue_entry__isnull=False
+                ).values_list("queue_entry_id", flat=True)
+            )
+            .order_by("scheduled_date", "position", "id")
+        )
+        if not locked:
+            return {"repaired": 0, "batch_id": None}
+
+        scheduled_date = locked[0].scheduled_date or today
+        batch = NotificationBatch.objects.create(
+            created_by=created_by,
+            scheduled_date=scheduled_date,
+            batch_size=len(locked),
+            channel=channel,
+            message_template="Repair orphaned awaiting-desk students",
+        )
+        new_batch_id = batch.id
+
+        for index, entry in enumerate(locked, start=1):
+            # Keep existing day when set; otherwise use batch day.
+            day = entry.scheduled_date or scheduled_date
+            code = entry.secret_code or entry.assign_secret_code()
+            if entry.position != index or not entry.secret_code or entry.scheduled_date != day:
+                entry.secret_code = code
+                entry.scheduled_date = day
+                entry.position = index
+                entry.status = QueueEntry.Status.NOTIFIED
+                if not entry.notified_at:
+                    entry.notified_at = timezone.now()
+                entry.save(
+                    update_fields=[
+                        "secret_code",
+                        "scheduled_date",
+                        "position",
+                        "status",
+                        "notified_at",
+                        "updated_at",
+                    ]
+                )
+            ensure_batch_membership(
+                batch,
+                entry,
+                scheduled_date=day,
+                code=code,
+                position=index,
+            )
+            prepared.append({"entry_id": entry.id, "code": code, "number": index})
+
+    queue_prepared_notices(
+        batch_id=new_batch_id,
+        prepared_items=prepared,
+        scheduled_date=scheduled_date,
+        channel=channel,
+    )
+    return {"repaired": len(prepared), "batch_id": new_batch_id}
 
 
 def recompact_batch_positions(batch_id):
@@ -512,7 +653,7 @@ def deliver_approval_notice(entry, *, scheduled_date, code, position, channel="b
 
 
 def log_delivery_attempts(batch, entry, *, scheduled_date, code, position, channels_tried):
-    """Persist NotificationLog rows for attempted channels."""
+    """Persist NotificationLog rows for attempted channels; keep membership if none."""
     email_body = build_approval_message(
         full_name=entry.student.full_name,
         registration_number=entry.student.registration_number,
@@ -527,6 +668,8 @@ def log_delivery_attempts(batch, entry, *, scheduled_date, code, position, chann
         secret_code=code,
         position=position,
     )
+
+    wrote = False
     for attempt in channels_tried or []:
         NotificationLog.objects.create(
             batch=batch,
@@ -536,6 +679,24 @@ def log_delivery_attempts(batch, entry, *, scheduled_date, code, position, chann
             body=email_body if attempt["channel"] == "email" else sms_body,
             success=attempt["success"],
             error_message=attempt.get("error") or "",
+        )
+        wrote = True
+
+    if wrote:
+        # Real delivery rows exist — drop the placeholder membership row.
+        NotificationLog.objects.filter(
+            batch=batch,
+            queue_entry_id=entry.id,
+            channel=BATCH_MEMBERSHIP_CHANNEL,
+        ).delete()
+    else:
+        # Never leave a student without a batch link if gateways returned nothing.
+        ensure_batch_membership(
+            batch,
+            entry,
+            scheduled_date=scheduled_date,
+            code=code,
+            position=position,
         )
 
 
@@ -547,28 +708,52 @@ def _deliver_prepared_notices(*, batch_id, prepared_items, scheduled_date, chann
         if not batch:
             return
         for item in prepared_items:
-            entry = (
-                QueueEntry.objects.select_related("student", "student__user")
-                .filter(pk=item["entry_id"])
-                .first()
-            )
-            if entry is None:
-                continue
-            channels_tried = deliver_approval_notice(
-                entry,
-                scheduled_date=scheduled_date,
-                code=item["code"],
-                position=item["number"],
-                channel=channel,
-            )
-            log_delivery_attempts(
-                batch,
-                entry,
-                scheduled_date=scheduled_date,
-                code=item["code"],
-                position=item["number"],
-                channels_tried=channels_tried,
-            )
+            try:
+                entry = (
+                    QueueEntry.objects.select_related("student", "student__user")
+                    .filter(pk=item["entry_id"])
+                    .first()
+                )
+                if entry is None:
+                    continue
+                channels_tried = deliver_approval_notice(
+                    entry,
+                    scheduled_date=scheduled_date,
+                    code=item["code"],
+                    position=item["number"],
+                    channel=channel,
+                )
+                log_delivery_attempts(
+                    batch,
+                    entry,
+                    scheduled_date=scheduled_date,
+                    code=item["code"],
+                    position=item["number"],
+                    channels_tried=channels_tried,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Delivery failed for queue_entry=%s batch=%s — membership kept",
+                    item.get("entry_id"),
+                    batch_id,
+                )
+                # Re-assert membership so soft-refresh never orphans this student.
+                try:
+                    entry = QueueEntry.objects.filter(pk=item["entry_id"]).first()
+                    if entry is not None:
+                        ensure_batch_membership(
+                            batch,
+                            entry,
+                            scheduled_date=scheduled_date,
+                            code=item.get("code") or entry.secret_code or "",
+                            position=item.get("number") or entry.position,
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Could not re-link queue_entry=%s to batch=%s",
+                        item.get("entry_id"),
+                        batch_id,
+                    )
     finally:
         close_old_connections()
 
@@ -1768,6 +1953,13 @@ class NotifyBatchView(APIView):
                     channel=channel,
                     position=batch_number,
                 )
+                ensure_batch_membership(
+                    batch,
+                    entry,
+                    scheduled_date=scheduled_date,
+                    code=code,
+                    position=batch_number,
+                )
                 prepared.append(
                     {
                         "entry_id": entry.id,
@@ -2210,6 +2402,13 @@ class AdminRescheduleView(APIView):
                 channel=channel,
                 position=1,
             )
+            ensure_batch_membership(
+                new_batch,
+                entry,
+                scheduled_date=scheduled_date,
+                code=code,
+                position=1,
+            )
             entry_pk = entry.id
 
         entry = (
@@ -2218,18 +2417,20 @@ class AdminRescheduleView(APIView):
             .first()
         )
         new_batch = NotificationBatch.objects.get(pk=new_batch_id)
+        prepared = [
+            {
+                "entry_id": entry_pk,
+                "code": code,
+                "number": entry.position or 1,
+            }
+        ]
         queue_prepared_notices(
             batch_id=new_batch_id,
-            prepared_items=[
-                {
-                    "entry_id": entry_pk,
-                    "code": code,
-                    "number": entry.position or 1,
-                }
-            ],
+            prepared_items=prepared,
             scheduled_date=scheduled_date,
             channel=channel,
         )
+        results = batch_results_from_prepared(prepared)
         return Response(
             {
                 "message": (
@@ -2242,7 +2443,10 @@ class AdminRescheduleView(APIView):
                 "channels": [],
                 "delivery_pending": True,
                 "entry": AdminQueueEntrySerializer(entry).data,
-                "batch": build_live_batch_payload(new_batch, rescheduled=True),
+                "batch": NotificationBatchSerializer(new_batch).data,
+                "students": results,
+                "remaining_in_batch": len(results),
+                "rescheduled": True,
             }
         )
 
@@ -2256,6 +2460,12 @@ class AdminActiveBatchView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
+        # Heal orphans from the old detach-before-delivery bug (once) and
+        # re-queue their email/SMS.
+        repair = repair_orphaned_batch_entries(created_by=request.user)
+        repaired_n = int(repair.get("repaired") or 0)
+        repair_batch_id = repair.get("batch_id")
+
         batch_id = request.query_params.get("batch_id")
         if batch_id:
             batch = NotificationBatch.objects.filter(id=batch_id).first()
@@ -2263,12 +2473,30 @@ class AdminActiveBatchView(APIView):
                 return Response(
                     {"detail": "Batch not found."}, status=status.HTTP_404_NOT_FOUND
                 )
-            return Response(build_live_batch_payload(batch))
+            payload = build_live_batch_payload(batch)
+            if repaired_n and repair_batch_id and str(batch.id) == str(repair_batch_id):
+                payload["message"] = (
+                    f"Restored {repaired_n} student(s) that had lost batch membership "
+                    f"and re-queued their email/SMS. "
+                    + (payload.get("message") or "")
+                )
+                payload["delivery_pending"] = True
+                payload["orphans_repaired"] = repaired_n
+            return Response(payload)
 
         # Prefer the newest batch that still has remaining (unapproved) students
         for batch in NotificationBatch.objects.order_by("-created_at", "-id")[:40]:
             if live_batch_entries(batch.id):
-                return Response(build_live_batch_payload(batch))
+                payload = build_live_batch_payload(batch)
+                if repaired_n:
+                    payload["message"] = (
+                        f"Restored {repaired_n} student(s) that had lost batch membership "
+                        f"and re-queued their email/SMS. "
+                        + (payload.get("message") or "")
+                    )
+                    payload["delivery_pending"] = True
+                    payload["orphans_repaired"] = repaired_n
+                return Response(payload)
 
         return Response(
             {
@@ -2332,23 +2560,51 @@ class AdminBatchRescheduleView(APIView):
             shortage = requested > available
             move_ids = [e.id for e in to_move]
 
-            detach_entries_from_batch(batch_id, move_ids)
+            # Lock rows so concurrent approve/delete cannot drop mid-move.
+            locked_move = list(
+                QueueEntry.objects.select_for_update()
+                .select_related("student", "student__user")
+                .filter(pk__in=move_ids, status__in=ACTIVE_BATCH_STATUSES)
+                .order_by("position", "id")
+            )
+            if not locked_move:
+                return Response(
+                    {
+                        "detail": (
+                            "No students remain in this batch table. "
+                            "Approved students already left; notify a new waiting batch if needed."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            detach_entries_from_batch(batch_id, [e.id for e in locked_move])
+            recompact_batch_positions(batch_id)
 
             new_batch = NotificationBatch.objects.create(
                 created_by=request.user,
                 scheduled_date=scheduled_date,
-                batch_size=len(to_move),
+                batch_size=len(locked_move),
                 channel=channel,
                 message_template=f"Reschedule remaining from batch {batch_id}",
             )
             new_batch_id = new_batch.id
 
-            for index, entry in enumerate(to_move, start=1):
+            for index, entry in enumerate(locked_move, start=1):
                 code, _ = apply_reschedule(
                     entry,
                     scheduled_date,
                     notify=False,
                     channel=channel,
+                    position=index,
+                )
+                # Membership BEFORE commit — students stay visible even if
+                # email/SMS delivery is still in flight or fails.
+                ensure_batch_membership(
+                    new_batch,
+                    entry,
+                    scheduled_date=scheduled_date,
+                    code=code,
                     position=index,
                 )
                 prepared.append(
