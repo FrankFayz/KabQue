@@ -326,11 +326,9 @@ export default function BatchResultTable({
       ) : null}
       {smsFailed ? (
         <Alert>
-          SMS could not be delivered for {result.sms_failed} student
-          {result.sms_failed === 1 ? '' : 's'}
-          {Array.isArray(result.sms_errors) && result.sms_errors[0]
-            ? `: ${result.sms_errors[0]}`
-            : '. Open the MySMSGate app on the gateway phone and keep it online.'}
+          Text messages could not be sent for {result.sms_failed} student
+          {result.sms_failed === 1 ? '' : 's'}. Open the SMS app on the gateway
+          phone, keep it online, then try again.
         </Alert>
       ) : null}
 

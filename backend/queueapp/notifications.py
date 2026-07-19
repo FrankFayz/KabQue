@@ -221,32 +221,57 @@ def _parse_mysmsgate_error(raw: str, fallback: str = "MySMSGate request failed")
 
 
 def _mysmsgate_hint(status_code: int, detail: str) -> str:
-    """Short operator-facing codes (not long browser essays)."""
+    """Calm, non-technical copy for the desk — keep provider jargon in logs only."""
     lower = (detail or "").lower()
-    if status_code in (401, 403) or "unauthorized" in lower or "invalid api" in lower:
-        return (
-            "Invalid MySMSGate API key — copy a fresh key from mysmsgate.net, "
-            "paste into Render MYSMSGATE_API_KEY (no quotes), save, Manual Deploy, "
-            "then put the same key in the phone app"
+
+    # Explicit key rejection only — do not treat every 401 as a bad key
+    # (offline gateways sometimes return Unauthorized too).
+    key_rejected = (
+        "invalid api key" in lower
+        or "invalid api" in lower
+        or (
+            "api key" in lower
+            and ("invalid" in lower or "missing" in lower or "expired" in lower)
         )
+    )
+    if key_rejected:
+        return (
+            "Text messages could not be sent. SMS setup needs a quick check — "
+            "ask the system admin if this keeps happening."
+        )
+
     if (
-        status_code in (404, 409, 422, 503)
+        status_code in (401, 403)
+        or "unauthorized" in lower
         or "no device" in lower
         or "offline" in lower
         or "not connected" in lower
         or "no online" in lower
         or "device not found" in lower
+        or status_code in (404, 409, 422, 503)
     ):
-        return "MySMSGate device offline — open the app on the gateway phone and keep it online"
+        return (
+            "Text messages could not be sent. Open the SMS gateway app on the "
+            "phone, keep it online, then try again."
+        )
     if "sim" in lower or "slot" in lower:
-        return "Wrong SIM slot on server (clear MYSMSGATE_SIM_SLOT, or use 0 for SIM 1)"
+        return (
+            "Text messages could not be sent from the SIM on the gateway phone. "
+            "Check airtime and try again."
+        )
     if "phone" in lower or "number" in lower or "invalid to" in lower or "recipient" in lower:
-        return "Invalid recipient phone on student profile"
+        return (
+            "Text messages could not be sent — that student’s phone number looks "
+            "incomplete. Update their profile and try again."
+        )
     if "balance" in lower or "credit" in lower or "quota" in lower:
-        return "MySMSGate account limit reached — check the dashboard"
-    if detail:
-        return detail[:160]
-    return "SMS send failed"
+        return (
+            "Text messages could not be sent right now. Try again a little later."
+        )
+    return (
+        "Text messages could not be sent right now. Keep the gateway phone online "
+        "and try again in a moment."
+    )
 
 
 def _mysmsgate_accepted(status_code: int, parsed: dict | None) -> bool:
@@ -379,17 +404,23 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         api_key = api_key[7:].strip()
     if not api_key:
         return False, (
-            "MySMSGate API key missing on server — set MYSMSGATE_API_KEY "
-            "(e.g. on Render Environment)"
+            "Text messages could not be sent. SMS is not fully set up yet — "
+            "ask the system admin to finish setup, then try again."
         )
 
     # MySMSGate requires international format: +CC… (e.g. +2567XXXXXXXX).
     try:
         recipient = validate_east_africa_phone(to_phone)
-    except ValueError as exc:
-        return False, str(exc)
+    except ValueError:
+        return False, (
+            "Text messages could not be sent — that student’s phone number looks "
+            "incomplete. Update their profile and try again."
+        )
     if not recipient.startswith("+"):
-        return False, f"Phone must start with country code (+…), got: {to_phone}"
+        return False, (
+            "Text messages could not be sent — that student’s phone number looks "
+            "incomplete. Update their profile and try again."
+        )
 
     endpoint = (
         getattr(settings, "MYSMSGATE_API_URL", "") or "https://mysmsgate.net/api/v1/send"
@@ -404,20 +435,24 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     )
     text = message[:1000]
 
-    # This gateway phone reports default_sim_slot=1 (SIM 2). Auto/empty then
-    # uses SIM 2, which often queues locally but never reaches students.
-    # Prefer SIM 1 (slot 0) unless the operator explicitly sets a slot.
-    preferred_slot = 0 if configured_slot is None else configured_slot
-    fallback_slot = 1 if preferred_slot == 0 else 0
+    # Prefer the simple docs payload (no slot / optional device), then SIM fallbacks.
+    preferred_slot = configured_slot
+    fallback_slot = 1 if (preferred_slot or 0) == 0 else 0
 
-    def _payload(slot: int) -> dict:
-        # Official MySMSGate shape: to must be E.164 with country code.
-        body = {"to": recipient, "message": text, "slot": slot}
-        if device_id:
+    def _payload(*, slot=None, include_device: bool = True) -> dict:
+        body = {"to": recipient, "message": text}
+        if slot is not None:
+            body["slot"] = int(slot)
+        if include_device and device_id:
             body["device_id"] = device_id
         return body
 
-    attempts = [_payload(preferred_slot), _payload(fallback_slot)]
+    attempts = [
+        _payload(include_device=True),
+        _payload(include_device=False),
+        _payload(slot=preferred_slot if preferred_slot is not None else 0),
+        _payload(slot=fallback_slot),
+    ]
     seen = set()
     unique: list[dict] = []
     for payload in attempts:
@@ -429,7 +464,10 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         seen.add(key)
         unique.append(payload)
 
-    last_error = "SMS send failed"
+    last_error = (
+        "Text messages could not be sent right now. Keep the gateway phone online "
+        "and try again in a moment."
+    )
     for payload in unique:
         ok, _code, err, parsed = _mysmsgate_post(endpoint, api_key, payload)
         if not ok:
@@ -452,9 +490,8 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
 
         if final_status in ("failed", "error"):
             last_error = (
-                f"MySMSGate marked SMS failed on SIM {int(payload.get('slot', 0)) + 1}. "
-                "Put airtime on the SIM that should send, set MYSMSGATE_SIM_SLOT to that "
-                "SIM (0 = SIM 1, 1 = SIM 2), and keep the app online."
+                "Text messages could not be sent from the gateway phone. "
+                "Check airtime, keep the SMS app online, then try again."
             )
             logger.warning(
                 "MySMSGate SMS to %s failed after accept (sms_id=%s, status=%s, slot=%s)",
@@ -474,12 +511,6 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         )
         return True, ""
 
-    if "offline" not in last_error.lower() and "api key" not in last_error.lower():
-        last_error = (
-            f"{last_error}. Keep the MySMSGate Android app open and online, "
-            "use SIM 1 for SMS (MYSMSGATE_SIM_SLOT=0), and confirm each student "
-            "phone is THEIR number — not the gateway phone."
-        )
     return False, last_error
 
 

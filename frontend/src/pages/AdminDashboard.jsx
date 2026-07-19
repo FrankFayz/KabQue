@@ -314,13 +314,8 @@ export default function AdminDashboard() {
           },
         });
       } else if (data.sms_failed && (mode === 'sms' || mode === 'both')) {
-        const reason = Array.isArray(data.sms_errors) && data.sms_errors.length
-          ? ` Reason: ${data.sms_errors[0]}`
-          : !data.sms_configured
-            ? ' SMS is not set up on the server yet.'
-            : ' Open MySMSGate on the gateway phone and keep it online.';
         setNotifyMessage(
-          `Batch sent (${mode}). Emails: ${data.emails_sent ?? 0}. SMS failed for ${data.sms_failed} student(s).${reason}`
+          `Batch prepared. Emails: ${data.emails_sent ?? 0}. Text messages could not be sent for ${data.sms_failed} student(s) — keep the gateway phone online and try again.`
         );
       } else {
         setNotifyMessage(
