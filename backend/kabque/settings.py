@@ -173,6 +173,14 @@ def _clean_env(value: str) -> str:
     return text
 
 
+def _clean_mysmsgate_api_key(value: str) -> str:
+    """Normalize MySMSGate keys pasted from dashboards (quotes / Bearer prefix)."""
+    key = _clean_env(value)
+    if key.lower().startswith("bearer "):
+        key = key[7:].strip()
+    return key
+
+
 # Brevo (Sendinblue) transactional email — used when BREVO_API_KEY is set
 BREVO_API_KEY = _clean_env(os.getenv("BREVO_API_KEY", ""))
 BREVO_SENDER_EMAIL = _clean_env(os.getenv("BREVO_SENDER_EMAIL", ""))
@@ -191,7 +199,7 @@ NATIONWIDE_GPS_TESTING = os.getenv("NATIONWIDE_GPS_TESTING", "True").lower() in 
 )
 
 # MySMSGate — SMS via your connected Android phone
-MYSMSGATE_API_KEY = _clean_env(os.getenv("MYSMSGATE_API_KEY", ""))
+MYSMSGATE_API_KEY = _clean_mysmsgate_api_key(os.getenv("MYSMSGATE_API_KEY", ""))
 MYSMSGATE_API_URL = _clean_env(
     os.getenv("MYSMSGATE_API_URL", "https://mysmsgate.net/api/v1/send")
 ) or "https://mysmsgate.net/api/v1/send"

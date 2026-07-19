@@ -224,7 +224,11 @@ def _mysmsgate_hint(status_code: int, detail: str) -> str:
     """Short operator-facing codes (not long browser essays)."""
     lower = (detail or "").lower()
     if status_code in (401, 403) or "unauthorized" in lower or "invalid api" in lower:
-        return "Invalid MySMSGate API key on server"
+        return (
+            "Invalid MySMSGate API key — copy a fresh key from mysmsgate.net, "
+            "paste into Render MYSMSGATE_API_KEY (no quotes), save, Manual Deploy, "
+            "then put the same key in the phone app"
+        )
     if (
         status_code in (404, 409, 422, 503)
         or "no device" in lower
@@ -371,6 +375,8 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     on a dual-SIM phone) — not that KabQue rewrote the destination.
     """
     api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
+    if api_key.lower().startswith("bearer "):
+        api_key = api_key[7:].strip()
     if not api_key:
         return False, (
             "MySMSGate API key missing on server — set MYSMSGATE_API_KEY "
@@ -390,6 +396,9 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
     ).strip()
 
     device_id = (getattr(settings, "MYSMSGATE_DEVICE_ID", "") or "").strip()
+    # Ignore obvious placeholders so a bad device id cannot poison auth/routing.
+    if device_id.lower() in ("", "none", "null", "undefined", "your_device_id"):
+        device_id = ""
     configured_slot = _parse_optional_sim_slot(
         getattr(settings, "MYSMSGATE_SIM_SLOT", None)
     )
