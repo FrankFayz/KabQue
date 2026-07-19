@@ -32,6 +32,25 @@ def _digits(value: str) -> str:
     return re.sub(r"\D", "", value or "")
 
 
+def to_sms_destination(phone: str) -> str:
+    """
+    Final gate for MySMSGate: always E.164 with country code (+CC…).
+
+    Examples: +2567XXXXXXXX (UG), +2547XXXXXXXX (KE).
+    Raises ValueError if the number cannot be made international.
+    """
+    normalized = validate_east_africa_phone(phone)
+    if not normalized:
+        raise ValueError("Telephone number is required for SMS notifications.")
+    # Strip spaces / dashes that might sneak in from older profiles
+    compact = "+" + "".join(ch for ch in normalized[1:] if ch.isdigit())
+    if not re.fullmatch(r"\+[1-9]\d{7,14}", compact):
+        raise ValueError(
+            "Phone must include a country code (select Uganda, Kenya, etc.)."
+        )
+    return compact
+
+
 def normalize_phone(phone: str) -> str:
     """
     Normalize to E.164 (+CC…).

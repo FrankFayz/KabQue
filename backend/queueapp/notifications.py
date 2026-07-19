@@ -8,7 +8,7 @@ import urllib.request
 from django.conf import settings
 from django.core.mail import send_mail
 
-from .phones import normalize_phone, validate_east_africa_phone
+from .phones import normalize_phone, to_sms_destination, validate_east_africa_phone
 from .auth_utils import normalize_email
 
 logger = logging.getLogger(__name__)
@@ -408,15 +408,10 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
             "ask the system admin to finish setup, then try again."
         )
 
-    # MySMSGate requires international format: +CC… (e.g. +2567XXXXXXXX).
+    # MySMSGate requires international E.164: +CC… (e.g. +2567XXXXXXXX).
     try:
-        recipient = validate_east_africa_phone(to_phone)
+        recipient = to_sms_destination(to_phone)
     except ValueError:
-        return False, (
-            "Text messages could not be sent — that student’s phone number looks "
-            "incomplete. Update their profile and try again."
-        )
-    if not recipient.startswith("+"):
         return False, (
             "Text messages could not be sent — that student’s phone number looks "
             "incomplete. Update their profile and try again."
@@ -523,15 +518,23 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
     """
     raw = (phone or "").strip()
     if not raw:
-        return False, "No phone on student profile"
+        return False, (
+            "Text messages could not be sent — no telephone on that student’s profile."
+        )
     try:
-        to_phone = validate_east_africa_phone(raw)
+        to_phone = to_sms_destination(raw)
     except ValueError as exc:
         # Last chance: normalize local 07… → +256… then re-validate
         try:
-            to_phone = validate_east_africa_phone(normalize_phone(raw))
+            to_phone = to_sms_destination(normalize_phone(raw))
         except ValueError:
-            return False, str(exc)
+            return False, (
+                "Text messages could not be sent — that student’s phone number must "
+                "include a country code (e.g. Uganda +256…)."
+            ) if "country" in str(exc).lower() else (
+                "Text messages could not be sent — that student’s phone number looks "
+                "incomplete. Update their profile and try again."
+            )
 
     if (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip():
         return _send_via_mysmsgate(to_phone, body)
