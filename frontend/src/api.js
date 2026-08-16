@@ -272,12 +272,16 @@ const FRIENDLY_PHRASES = [
     'We could not read your GPS. Allow location and try outdoors.',
   ],
   [
-    /outside the (campus|allowed)|not on campus|too far from campus/i,
-    'You must be on campus to join the queue. Move closer and try again.',
+    /outside the (campus|allowed)|not on campus|too far from campus|join only from kikungiri/i,
+    'Join only from Kikungiri Campus. Move onto campus, then try again.',
   ],
   [
-    /gps accuracy|location accuracy|accuracy (is )?too (low|high|poor)/i,
-    'GPS accuracy is too weak. Move outdoors and try again.',
+    /almost there|stronger gps|clearer gps/i,
+    'Almost there — wait for a clearer GPS fix on campus, then try again.',
+  ],
+  [
+    /gps accuracy|location accuracy|accuracy (is )?too (low|high|poor)|gps signal is too weak/i,
+    'GPS signal is too weak. Move outdoors on campus and try again.',
   ],
   [
     /sign in succeeded but no user/i,
