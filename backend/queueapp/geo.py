@@ -112,17 +112,18 @@ def validate_join_gps(
 
     if acc > MAX_JOIN_ACCURACY_M:
         raise ValueError(
-            f"GPS accuracy is too weak (~{int(acc)}m). Move outdoors and try again "
-            f"(need under {MAX_JOIN_ACCURACY_M}m)."
+            "GPS signal is too weak. Move outdoors on campus and try again."
         )
 
-    # Uncertainty ellipse: reject if the fix could still be outside campus.
+    if distance > radius:
+        raise ValueError(
+            "Join only from Kikungiri Campus. Move onto campus, then try again."
+        )
+
+    # Uncertainty ellipse: near the edge but fix is not confident enough.
     if distance + acc > radius:
         raise ValueError(
-            "You must be on Kabale University (Kikungiri Campus) to join the queue. "
-            f"Move onto campus and wait for a stronger GPS fix "
-            f"(~{int(distance)}m from centre, accuracy ±{int(acc)}m, "
-            f"allowed {int(radius)}m)."
+            "Almost there — wait for a clearer GPS fix on campus, then try again."
         )
 
     if samples and isinstance(samples, list) and len(samples) >= 2:
@@ -140,16 +141,7 @@ def validate_join_gps(
                 max_spread = max(max_spread, geodesic(p1, p2).meters)
         if max_spread > 150:
             raise ValueError(
-                "GPS readings jumped too far between samples. Stay still outdoors, "
-                "turn off fake-location apps, and try again."
+                "GPS jumped while checking. Stay still outdoors and try again."
             )
-
-    if distance > radius:
-        raise ValueError(
-            "You must be on Kabale University (Kikungiri Campus) to join the queue. "
-            f"Turn on GPS and try again when you are on campus. "
-            f"(About {int(distance)}m outside the allowed area; "
-            f"allowed radius: {int(radius)}m.)"
-        )
 
     return distance, radius, acc
