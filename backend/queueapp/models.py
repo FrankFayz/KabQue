@@ -455,27 +455,54 @@ class CampusSettings(models.Model):
         cls.ensure_lifetime_columns()
         obj, _ = cls.objects.get_or_create(pk=1)
 
-        # Env / Django settings are the source of truth for the join geofence.
+        nationwide = bool(getattr(settings, "NATIONWIDE_GPS_TESTING", False))
         name = getattr(settings, "CAMPUS_NAME", obj.name) or obj.name
-        lat = settings.CAMPUS_LATITUDE
-        lon = settings.CAMPUS_LONGITUDE
+        lat = float(settings.CAMPUS_LATITUDE)
+        lon = float(settings.CAMPUS_LONGITUDE)
         radius = int(settings.CAMPUS_RADIUS_METERS)
-        if (
+        enforce = bool(getattr(settings, "GPS_ENFORCEMENT", True))
+
+        if not nationwide:
+            # Production: Kabale Kikungiri only — clamp leftover Uganda-wide values.
+            kabale = (-1.272215, 29.988321)
+            try:
+                from geopy.distance import geodesic
+
+                if geodesic(kabale, (lat, lon)).meters > 50_000:
+                    lat, lon = kabale
+                    name = "Kabale University Kikungiri"
+            except Exception:
+                lat, lon = kabale
+                name = "Kabale University Kikungiri"
+            radius = max(100, min(int(radius or 800), 2500))
+            enforce = True
+            if (
+                not name
+                or "nationwide" in name.lower()
+                or name.strip().lower() == "uganda"
+            ):
+                name = "Kabale University Kikungiri"
+
+        changed = (
             (obj.name or "") != name
             or float(obj.latitude) != float(lat)
             or float(obj.longitude) != float(lon)
-            or int(obj.radius_meters or 0) != radius
-        ):
+            or int(obj.radius_meters or 0) != int(radius)
+            or bool(obj.gps_enforcement) != bool(enforce)
+        )
+        if changed:
             obj.name = name
             obj.latitude = lat
             obj.longitude = lon
-            obj.radius_meters = radius
+            obj.radius_meters = int(radius)
+            obj.gps_enforcement = bool(enforce)
             obj.save(
                 update_fields=[
                     "name",
                     "latitude",
                     "longitude",
                     "radius_meters",
+                    "gps_enforcement",
                     "updated_at",
                 ]
             )

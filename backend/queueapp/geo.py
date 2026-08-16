@@ -4,30 +4,58 @@ from django.conf import settings
 from .models import CampusSettings
 
 # Join is rejected if reported accuracy is weaker than this (metres).
-# Many phones in Uganda report 100–300m under cloud/urban cover; 80m was too strict.
 MAX_JOIN_ACCURACY_M = 500
+
+# Production fence — Kikungiri Campus (never trust a leftover nationwide DB/env).
+KABALE_KIKUNGIRI = (-1.272215, 29.988321)
+DEFAULT_CAMPUS_RADIUS_M = 800
+MAX_PRODUCTION_RADIUS_M = 2500
+# If configured centre is farther than this from Kikungiri, force Kabale.
+MAX_CENTRE_DRIFT_FROM_KABALE_M = 50_000
+
+
+def resolve_campus_geofence() -> tuple[tuple[float, float], float, bool]:
+    """
+    Return ((lat, lon), radius_m, enforce).
+
+    When nationwide testing is off, always enforce a Kabale-sized fence even if
+    Render/Neon still hold old Uganda-wide coordinates.
+    """
+    # Keep DB row aligned with env (and clamp production values).
+    campus = CampusSettings.get_solo()
+    nationwide = bool(getattr(settings, "NATIONWIDE_GPS_TESTING", False))
+
+    if nationwide:
+        center = (float(campus.latitude), float(campus.longitude))
+        radius = float(campus.radius_meters)
+        enforce = bool(campus.gps_enforcement) and bool(
+            getattr(settings, "GPS_ENFORCEMENT", True)
+        )
+        return center, radius, enforce
+
+    lat = float(getattr(settings, "CAMPUS_LATITUDE", KABALE_KIKUNGIRI[0]))
+    lon = float(getattr(settings, "CAMPUS_LONGITUDE", KABALE_KIKUNGIRI[1]))
+    if geodesic(KABALE_KIKUNGIRI, (lat, lon)).meters > MAX_CENTRE_DRIFT_FROM_KABALE_M:
+        lat, lon = KABALE_KIKUNGIRI
+
+    radius = float(
+        getattr(settings, "CAMPUS_RADIUS_METERS", DEFAULT_CAMPUS_RADIUS_M)
+        or DEFAULT_CAMPUS_RADIUS_M
+    )
+    # Never allow a country-sized "campus" in production mode.
+    radius = min(max(radius, 100.0), float(MAX_PRODUCTION_RADIUS_M))
+    return (lat, lon), radius, True
 
 
 def campus_center_and_radius():
-    CampusSettings.ensure_lifetime_columns()
-    campus = CampusSettings.objects.first()
-    if campus:
-        center = (float(campus.latitude), float(campus.longitude))
-        radius = float(campus.radius_meters)
-        enforce = bool(campus.gps_enforcement)
-    else:
-        center = (settings.CAMPUS_LATITUDE, settings.CAMPUS_LONGITUDE)
-        radius = float(settings.CAMPUS_RADIUS_METERS)
-        enforce = bool(settings.GPS_ENFORCEMENT)
-    return center, radius, enforce
+    return resolve_campus_geofence()
 
 
 def is_on_campus(latitude: float, longitude: float) -> tuple[bool, float, float]:
     """
     Return (allowed, distance_meters, radius_meters).
-    Uses CampusSettings if present, else env defaults.
     """
-    center, radius, enforce = campus_center_and_radius()
+    center, radius, enforce = resolve_campus_geofence()
     distance = geodesic(center, (float(latitude), float(longitude))).meters
     if not enforce:
         return True, distance, radius
@@ -56,16 +84,16 @@ def validate_join_gps(
     if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
         raise ValueError("Invalid GPS coordinates.")
 
-    # Null Island / empty fix
     if abs(lat) < 0.0001 and abs(lon) < 0.0001:
         raise ValueError(
             "Invalid GPS location detected. Turn off any fake-location apps and try again."
         )
 
-    center, radius, enforce = campus_center_and_radius()
+    center, radius, enforce = resolve_campus_geofence()
     distance = geodesic(center, (lat, lon)).meters
 
     if not enforce:
+        # Production path always sets enforce=True; this only applies to explicit QA.
         acc = float(accuracy) if accuracy is not None else 0.0
         return distance, radius, acc
 
@@ -88,11 +116,11 @@ def validate_join_gps(
             f"(need under {MAX_JOIN_ACCURACY_M}m)."
         )
 
-    # Uncertainty ellipse: if the fix could still be outside campus, reject
+    # Uncertainty ellipse: reject if the fix could still be outside campus.
     if distance + acc > radius:
         raise ValueError(
-            "Your location is not confidently inside the campus zone. "
-            f"Move closer to campus and wait for a stronger GPS fix "
+            "You must be on Kabale University (Kikungiri Campus) to join the queue. "
+            f"Move onto campus and wait for a stronger GPS fix "
             f"(~{int(distance)}m from centre, accuracy ±{int(acc)}m, "
             f"allowed {int(radius)}m)."
         )
@@ -118,8 +146,8 @@ def validate_join_gps(
 
     if distance > radius:
         raise ValueError(
-            "You must be on Kikungiri Campus to join the queue. "
-            f"Turn on GPS and try again. "
+            "You must be on Kabale University (Kikungiri Campus) to join the queue. "
+            f"Turn on GPS and try again when you are on campus. "
             f"(About {int(distance)}m outside the allowed area; "
             f"allowed radius: {int(radius)}m.)"
         )

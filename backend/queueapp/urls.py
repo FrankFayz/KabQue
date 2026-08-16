@@ -80,6 +80,7 @@ urlpatterns = [
         name="admin_remove_from_queue",
     ),
     path("admin/campus/", views.CampusSettingsView.as_view(), name="admin_campus"),
+    path("campus/zone/", views.CampusZonePublicView.as_view(), name="campus_zone"),
     path(
         "main-admin/overview/",
         views.MainAdminOverviewView.as_view(),

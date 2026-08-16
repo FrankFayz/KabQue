@@ -263,7 +263,7 @@ class CompleteStudentProfileSerializer(serializers.Serializer):
 class JoinQueueSerializer(serializers.Serializer):
     latitude = serializers.FloatField()
     longitude = serializers.FloatField()
-    accuracy = serializers.FloatField(required=False, allow_null=True)
+    accuracy = serializers.FloatField(required=True, min_value=0.1)
     altitude = serializers.FloatField(required=False, allow_null=True)
     altitude_accuracy = serializers.FloatField(required=False, allow_null=True)
     speed = serializers.FloatField(required=False, allow_null=True)

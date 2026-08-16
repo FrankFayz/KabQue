@@ -2747,14 +2747,57 @@ class CampusSettingsView(APIView):
     permission_classes = [IsQueueAdmin]
 
     def get(self, request):
-        return Response(CampusSettingsSerializer(CampusSettings.get_solo()).data)
+        from .geo import resolve_campus_geofence
+
+        center, radius, enforce = resolve_campus_geofence()
+        campus = CampusSettings.get_solo()
+        data = CampusSettingsSerializer(campus).data
+        data["latitude"] = center[0]
+        data["longitude"] = center[1]
+        data["radius_meters"] = int(radius)
+        data["gps_enforcement"] = enforce
+        return Response(data)
 
     def patch(self, request):
+        from .geo import resolve_campus_geofence
+
         campus = CampusSettings.get_solo()
         serializer = CampusSettingsSerializer(campus, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data)
+        # Re-apply production clamp so desk edits cannot reopen Uganda-wide joins.
+        campus = CampusSettings.get_solo()
+        center, radius, enforce = resolve_campus_geofence()
+        data = CampusSettingsSerializer(campus).data
+        data["latitude"] = center[0]
+        data["longitude"] = center[1]
+        data["radius_meters"] = int(radius)
+        data["gps_enforcement"] = enforce
+        return Response(data)
+
+
+class CampusZonePublicView(APIView):
+    """Public read of the active join fence (no secrets) — for ops checks."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from .geo import resolve_campus_geofence
+
+        center, radius, enforce = resolve_campus_geofence()
+        campus = CampusSettings.get_solo()
+        return Response(
+            {
+                "name": campus.name,
+                "latitude": center[0],
+                "longitude": center[1],
+                "radius_meters": int(radius),
+                "gps_enforcement": enforce,
+                "nationwide_testing": bool(
+                    getattr(settings, "NATIONWIDE_GPS_TESTING", False)
+                ),
+            }
+        )
 
 
 def _main_admin_accounts_qs():
