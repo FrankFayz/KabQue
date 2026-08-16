@@ -357,12 +357,11 @@ class NotificationLog(models.Model):
 class CampusSettings(models.Model):
     """Singleton-style campus geofence configuration."""
 
-    name = models.CharField(max_length=100, default="Uganda (nationwide testing)")
-    # Geographic centre of Uganda · ~500km radius covers testers nationwide.
-    # Restore Kabale Kikungiri (-1.272215, 29.988321, 800m) for production.
-    latitude = models.DecimalField(max_digits=10, decimal_places=7, default=1.373333)
-    longitude = models.DecimalField(max_digits=10, decimal_places=7, default=32.290275)
-    radius_meters = models.PositiveIntegerField(default=500000)
+    name = models.CharField(max_length=100, default="Kabale University Kikungiri")
+    # Kikungiri Campus centre · ~800m join zone for freshers on site.
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, default=-1.272215)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, default=29.988321)
+    radius_meters = models.PositiveIntegerField(default=800)
     gps_enforcement = models.BooleanField(default=True)
     default_daily_batch_size = models.PositiveIntegerField(default=50)
     # Persist desk outcomes after students leave the live queue
@@ -456,29 +455,28 @@ class CampusSettings(models.Model):
         cls.ensure_lifetime_columns()
         obj, _ = cls.objects.get_or_create(pk=1)
 
-        # Testing: keep geofence = whole Uganda so join works off Kikungiri.
-        if getattr(settings, "NATIONWIDE_GPS_TESTING", True):
-            name = getattr(settings, "CAMPUS_NAME", "Uganda (nationwide testing)")
-            lat = settings.CAMPUS_LATITUDE
-            lon = settings.CAMPUS_LONGITUDE
-            radius = int(settings.CAMPUS_RADIUS_METERS)
-            if (
-                (obj.name or "") != name
-                or float(obj.latitude) != float(lat)
-                or float(obj.longitude) != float(lon)
-                or int(obj.radius_meters or 0) != radius
-            ):
-                obj.name = name
-                obj.latitude = lat
-                obj.longitude = lon
-                obj.radius_meters = radius
-                obj.save(
-                    update_fields=[
-                        "name",
-                        "latitude",
-                        "longitude",
-                        "radius_meters",
-                        "updated_at",
-                    ]
-                )
+        # Env / Django settings are the source of truth for the join geofence.
+        name = getattr(settings, "CAMPUS_NAME", obj.name) or obj.name
+        lat = settings.CAMPUS_LATITUDE
+        lon = settings.CAMPUS_LONGITUDE
+        radius = int(settings.CAMPUS_RADIUS_METERS)
+        if (
+            (obj.name or "") != name
+            or float(obj.latitude) != float(lat)
+            or float(obj.longitude) != float(lon)
+            or int(obj.radius_meters or 0) != radius
+        ):
+            obj.name = name
+            obj.latitude = lat
+            obj.longitude = lon
+            obj.radius_meters = radius
+            obj.save(
+                update_fields=[
+                    "name",
+                    "latitude",
+                    "longitude",
+                    "radius_meters",
+                    "updated_at",
+                ]
+            )
         return obj

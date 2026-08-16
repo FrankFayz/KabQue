@@ -186,13 +186,14 @@ BREVO_API_KEY = _clean_env(os.getenv("BREVO_API_KEY", ""))
 BREVO_SENDER_EMAIL = _clean_env(os.getenv("BREVO_SENDER_EMAIL", ""))
 BREVO_SENDER_NAME = _clean_env(os.getenv("BREVO_SENDER_NAME", "KabQue")) or "KabQue"
 
-CAMPUS_LATITUDE = float(os.getenv("CAMPUS_LATITUDE", "1.373333"))
-CAMPUS_LONGITUDE = float(os.getenv("CAMPUS_LONGITUDE", "32.290275"))
-CAMPUS_RADIUS_METERS = float(os.getenv("CAMPUS_RADIUS_METERS", "500000"))
+# Kabale University Kikungiri Campus (production geofence).
+CAMPUS_LATITUDE = float(os.getenv("CAMPUS_LATITUDE", "-1.272215"))
+CAMPUS_LONGITUDE = float(os.getenv("CAMPUS_LONGITUDE", "29.988321"))
+CAMPUS_RADIUS_METERS = float(os.getenv("CAMPUS_RADIUS_METERS", "800"))
 GPS_ENFORCEMENT = os.getenv("GPS_ENFORCEMENT", "True").lower() in ("1", "true", "yes")
-CAMPUS_NAME = os.getenv("CAMPUS_NAME", "Uganda (nationwide testing)")
-# True while QA can join from anywhere in Uganda. Set False for Kabale campus only.
-NATIONWIDE_GPS_TESTING = os.getenv("NATIONWIDE_GPS_TESTING", "True").lower() in (
+CAMPUS_NAME = os.getenv("CAMPUS_NAME", "Kabale University Kikungiri")
+# Legacy QA flag — keep False for campus-only. Env CAMPUS_* is always applied.
+NATIONWIDE_GPS_TESTING = os.getenv("NATIONWIDE_GPS_TESTING", "False").lower() in (
     "1",
     "true",
     "yes",
