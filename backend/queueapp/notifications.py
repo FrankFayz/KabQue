@@ -37,6 +37,23 @@ REQUIRED_DOCUMENTS = (
     "National ID (optional but recommended)",
 )
 
+# --- MySMSGate delivery-status vocabulary -------------------------------
+# A 202 response means the gateway ACCEPTED the message for queuing. It does not
+# mean the carrier transmitted it. Only these states are final outcomes.
+SMS_TERMINAL_SUCCESSES = ("sent", "delivered")
+SMS_TERMINAL_FAILURES = ("failed", "error", "rejected", "expired")
+
+# How long to wait for a terminal status before telling the truth. The gateway
+# queues on the phone, so a send can legitimately take several seconds.
+SMS_POLL_SECONDS = 20.0
+SMS_POLL_INTERVAL = 1.5
+
+SMS_UNCONFIRMED_ERROR = (
+    "The SMS gateway accepted your message but has not confirmed delivery yet. "
+    "It is queued on the gateway phone — keep the SMS app open and online, then "
+    "check with the student before notifying again."
+)
+
 
 def required_documents_payload() -> list[str]:
     """Same checklist for email, SMS context, and the student dashboard."""
@@ -86,17 +103,17 @@ def build_approval_sms(
 ) -> str:
     date_str = scheduled_date.strftime("%d %b %Y")
     first = (full_name or "Student").strip().split()[0] or "Student"
-    # Formal, short lines — MySMSGate allows longer multipart SMS.
+    # Must stay under 160 characters so it is ONE SMS segment.
+    #
+    # The gateway phone/carrier began rejecting every 2-part (multipart) message
+    # on 2026-07-20 with Android RESULT_ERROR_GENERIC_FAILURE while still
+    # delivering every 1-part message. Short messages have never failed once.
+    # Multipart also doubles cost, so single-segment is cheaper AND more reliable.
+    # The full document list stays in the email, which has no length pressure.
     return (
-        f"KabQue · Kabale University\n"
-        f"Dear {first},\n"
-        f"Document verification: {date_str}.\n"
-        f"Queue No: {position}\n"
-        f"Code: {secret_code}\n"
-        f"Reg: {registration_number}\n"
-        f"Bring originals: admission letter; academic docs; previous school ID; "
-        f"NCHE receipt; birth certificate; 3 passport photos; National ID if available.\n"
-        f"Do not share your code."
+        f"KabQue: {first}, your Kabale University document check is "
+        f"{date_str}, queue no {position}. Bring originals. "
+        f"Your desk code is {secret_code}. Do not share it."
     )
 
 
@@ -589,16 +606,26 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
         if isinstance(parsed, dict):
             sms_id = parsed.get("sms_id") or parsed.get("id")
 
-        # Brief poll — catch carrier/SIM failures that still returned HTTP 202.
+        # Poll until the gateway reports a TERMINAL status.
+        #
+        # A 202 only means the gateway ACCEPTED the message for queuing; it says
+        # nothing about whether the carrier actually transmitted it. Accepting
+        # "sending"/"pending" as success made the desk show a green tick for
+        # messages that were later marked failed. Keep polling until we see a
+        # real outcome, and treat a still-unknown outcome as NOT delivered.
         final_status = ""
         if sms_id not in (None, ""):
-            for _ in range(3):
-                time.sleep(1.2)
+            deadline = time.monotonic() + SMS_POLL_SECONDS
+            while time.monotonic() < deadline:
+                time.sleep(SMS_POLL_INTERVAL)
                 final_status = _mysmsgate_poll_status(api_key, sms_id)
-                if final_status in ("failed", "error", "sent", "delivered", "sending"):
+                if final_status in SMS_TERMINAL_FAILURES or (
+                    final_status in SMS_TERMINAL_SUCCESSES
+                ):
                     break
+                # "sending"/"pending"/"" are in-flight: keep waiting.
 
-        if final_status in ("failed", "error"):
+        if final_status in SMS_TERMINAL_FAILURES:
             last_error = (
                 "Text messages could not be sent from the gateway phone. "
                 "Check airtime, keep the SMS app online, then try again."
@@ -612,11 +639,27 @@ def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
             )
             continue
 
+        if final_status not in SMS_TERMINAL_SUCCESSES:
+            # Still queued, or the gateway never told us. Do not claim success,
+            # and do not retry with another payload: this message is already
+            # queued on the phone and will send itself, so a retry would deliver
+            # the student a duplicate code.
+            last_error = SMS_UNCONFIRMED_ERROR
+            logger.warning(
+                "MySMSGate SMS to %s unconfirmed (sms_id=%s, status=%r, slot=%s). "
+                "Treating as not delivered so the desk does not show a false success.",
+                recipient,
+                sms_id,
+                final_status,
+                payload.get("slot"),
+            )
+            return False, last_error
+
         logger.info(
             "MySMSGate SMS to student %s ok (sms_id=%s, status=%s, slot=%s)",
             recipient,
             sms_id,
-            final_status or (parsed or {}).get("status"),
+            final_status,
             payload.get("slot"),
         )
         return True, ""
