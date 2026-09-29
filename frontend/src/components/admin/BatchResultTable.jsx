@@ -256,8 +256,8 @@ export default function BatchResultTable({
       {smsFailed ? (
         <Alert>
           SMS failed for {result.sms_failed} student
-          {result.sms_failed === 1 ? '' : 's'}. Keep the gateway phone online,
-          then try again.
+          {result.sms_failed === 1 ? '' : 's'}. Check the SMS account, then try
+          again.
         </Alert>
       ) : null}
 

@@ -1,8 +1,8 @@
 import json
 import logging
 import re
-import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from django.conf import settings
@@ -37,21 +37,23 @@ REQUIRED_DOCUMENTS = (
     "National ID (optional but recommended)",
 )
 
-# --- MySMSGate delivery-status vocabulary -------------------------------
-# A 202 response means the gateway ACCEPTED the message for queuing. It does not
-# mean the carrier transmitted it. Only these states are final outcomes.
-SMS_TERMINAL_SUCCESSES = ("sent", "delivered")
-SMS_TERMINAL_FAILURES = ("failed", "error", "rejected", "expired")
+# --- Africa's Talking delivery-status vocabulary ---------------------------
+# AT answers synchronously with one Recipients[] entry per number. It confirms
+# the network ACCEPTED the message — it never confirms handset delivery, and it
+# says so in the response. Anything that is not an explicit accept is a
+# failure, so a broken sender ID or a typo'd number can never show a green tick.
+AT_ACCEPTED_STATUS_CODES = (101, 102, 103)
+AT_ACCEPTED_STATUS_WORDS = frozenset(
+    {"success", "sentsuccess", "sent", "submitted", "queued"}
+)
 
-# How long to wait for a terminal status before telling the truth. The gateway
-# queues on the phone, so a send can legitimately take several seconds.
-SMS_POLL_SECONDS = 20.0
-SMS_POLL_INTERVAL = 1.5
-
-SMS_UNCONFIRMED_ERROR = (
-    "The SMS gateway accepted your message but has not confirmed delivery yet. "
-    "It is queued on the gateway phone — keep the SMS app open and online, then "
-    "check with the student before notifying again."
+SMS_NOT_SET_UP_ERROR = (
+    "Text messages could not be sent. SMS is not fully set up yet — "
+    "ask the system admin to finish setup, then try again."
+)
+SMS_BAD_NUMBER_ERROR = (
+    "Text messages could not be sent — that student’s phone number looks "
+    "incomplete. Update their profile and try again."
 )
 
 
@@ -105,10 +107,8 @@ def build_approval_sms(
     first = (full_name or "Student").strip().split()[0] or "Student"
     # Must stay under 160 characters so it is ONE SMS segment.
     #
-    # The gateway phone/carrier began rejecting every 2-part (multipart) message
-    # on 2026-07-20 with Android RESULT_ERROR_GENERIC_FAILURE while still
-    # delivering every 1-part message. Short messages have never failed once.
-    # Multipart also doubles cost, so single-segment is cheaper AND more reliable.
+    # A multipart (2-part) message is rejected by some East African networks
+    # and costs double, while single-segment messages have always gone through.
     # The full document list stays in the email, which has no length pressure.
     return (
         f"KabQue: {first}, your Kabale University document check is "
@@ -234,7 +234,32 @@ def send_email_notification(to_email: str, subject: str, body: str) -> tuple[boo
         return False, str(exc)
 
 
-def _parse_mysmsgate_error(raw: str, fallback: str = "MySMSGate request failed") -> str:
+def _at_setting(name: str) -> str:
+    return (getattr(settings, name, "") or "").strip()
+
+
+def _at_is_sandbox() -> bool:
+    return (_at_setting("AFRICAS_TALKING_ENVIRONMENT") or "sandbox").lower() != "production"
+
+
+def _at_sender_id() -> str:
+    """
+    The `from` AT puts in front of the message.
+
+    Live: your approved alphanumeric sender ID (e.g. "KabQue") or shortcode.
+
+    Sandbox: return "" so the field is omitted entirely. The sandbox does NOT
+    ignore `from` — it rejects every value, including "sandbox" and "", with
+    `{"SMSMessageData": {"Message": "InvalidSenderId", "Recipients": []}}`.
+    Verified live against api.sandbox.africastalking.com.
+    """
+    if _at_is_sandbox():
+        return ""
+    return _at_setting("AFRICAS_TALKING_SHORTCODE")
+
+
+def _at_parse_error(raw: str, fallback: str = "Africa's Talking rejected the request") -> str:
+    """AT reports failures as {"errorMessage": ..., "errorCode": ...}."""
     text = (raw or "").strip()
     if not text:
         return fallback
@@ -243,436 +268,265 @@ def _parse_mysmsgate_error(raw: str, fallback: str = "MySMSGate request failed")
     except json.JSONDecodeError:
         return text[:400]
     if isinstance(parsed, dict):
-        for key in ("message", "error", "detail", "reason"):
-            val = parsed.get(key)
-            if val:
-                return str(val)
-        return str(parsed)[:400]
-    return str(parsed)[:400]
+        for key in ("errorMessage", "errorMessageId", "message", "error"):
+            value = parsed.get(key)
+            if value:
+                return str(value)[:300]
+    return str(parsed)[:300]
 
 
-def _looks_like_cloudflare_challenge(raw: str) -> bool:
-    text = (raw or "").lower()
-    return (
-        "just a moment" in text
-        or "cf-chl" in text
-        or "challenges.cloudflare.com" in text
-        or "cdn-cgi/challenge-platform" in text
-        or ("<!doctype html" in text and "cloudflare" in text)
-    )
-
-
-def _mysmsgate_hint(status_code: int, detail: str) -> str:
+def _at_hint(status_code: int, detail: str) -> str:
     """Calm, non-technical copy for the desk — keep provider jargon in logs only."""
     lower = (detail or "").lower()
 
-    if _looks_like_cloudflare_challenge(detail) or "cloudflare" in lower:
+    # A bad request shape is a server bug, never a student's fault. Check this
+    # before the number/network branches, because AT's own 415 text contains the
+    # words "not supported" and would otherwise be blamed on the phone number.
+    if (
+        status_code in (405, 415)
+        or "content-type" in lower
+        or "not supported. expected" in lower
+        or "unsupported media type" in lower
+    ):
         return (
-            "Text messages could not be sent from the live server right now. "
-            "The SMS provider is blocking that connection — try again shortly, "
-            "or ask the system admin to switch the SMS API address."
+            "Text messages could not be sent because the SMS service is "
+            "misconfigured on the server. Ask the system admin to check the SMS "
+            "setup, then try again."
         )
 
-    # Explicit key rejection only — do not treat every 401 as a bad key
-    # (offline gateways sometimes return Unauthorized too).
-    key_rejected = (
-        "invalid api key" in lower
-        or "invalid api" in lower
-        or (
-            "api key" in lower
-            and ("invalid" in lower or "missing" in lower or "expired" in lower)
-        )
-    )
-    if key_rejected:
+    if "api key" in lower and any(
+        word in lower for word in ("invalid", "missing", "unauthor", "not found", "401")
+    ):
+        return SMS_NOT_SET_UP_ERROR
+
+    if "credit" in lower or "balance" in lower or "quota" in lower:
         return (
-            "Text messages could not be sent. SMS setup needs a quick check — "
-            "ask the system admin if this keeps happening."
+            "Text messages could not be sent because the SMS account has no credit "
+            "left. Ask the system admin to top it up, then try again."
+        )
+
+    if "sandbox" in lower and any(
+        word in lower for word in ("test", "not allowed", "unauthorised", "unauthorized", "not approved")
+    ):
+        return (
+            "Text messages could not be sent — that number is not a registered test "
+            "number for the SMS sandbox. Ask the system admin to add it, or switch "
+            "the SMS account to the live service."
+        )
+
+    if "sender" in lower or "shortcode" in lower or "alphanumeric" in lower:
+        return (
+            "Text messages could not be sent because the SMS sender ID is not "
+            "approved on the account. Ask the system admin to check the SMS setup."
+        )
+
+    if "sent to 0/" in lower:
+        return SMS_BAD_NUMBER_ERROR
+
+    if "network" in lower or "notsupportedbynetwork" in lower or "operator" in lower:
+        return (
+            "Text messages could not be sent — that student’s network does not "
+            "accept the message. Check their phone number and try again."
         )
 
     if (
-        status_code in (401, 403)
-        or "unauthorized" in lower
-        or "no device" in lower
-        or "offline" in lower
-        or "not connected" in lower
-        or "no online" in lower
-        or "device not found" in lower
-        or status_code in (404, 409, 422, 503)
+        status_code in (400, 404, 422)
+        or "phone" in lower
+        or "number" in lower
+        or "recipient" in lower
+        or "msisdn" in lower
     ):
-        return (
-            "Text messages could not be sent. Open the SMS gateway app on the "
-            "phone, keep it online, then try again."
-        )
-    if "sim" in lower or "slot" in lower:
-        return (
-            "Text messages could not be sent from the SIM on the gateway phone. "
-            "Check airtime and try again."
-        )
-    if "phone" in lower or "number" in lower or "invalid to" in lower or "recipient" in lower:
-        return (
-            "Text messages could not be sent — that student’s phone number looks "
-            "incomplete. Update their profile and try again."
-        )
-    if "balance" in lower or "credit" in lower or "quota" in lower:
-        return (
-            "Text messages could not be sent right now. Try again a little later."
-        )
+        return SMS_BAD_NUMBER_ERROR
+
+    if status_code in (401, 403) or "forbidden" in lower or "unauthorized" in lower:
+        return SMS_NOT_SET_UP_ERROR
+
     return (
-        "Text messages could not be sent right now. Keep the gateway phone online "
-        "and try again in a moment."
+        "Text messages could not be sent right now. Try again in a moment, and ask "
+        "the system admin to check the SMS account if it keeps happening."
     )
 
 
-def _mysmsgate_accepted(status_code: int, parsed: dict | None) -> bool:
-    """HTTP 200/202 with success != false (MySMSGate queues as pending)."""
-    if status_code not in (200, 201, 202):
-        return False
-    if not isinstance(parsed, dict):
+def _at_recipient_accepted(entry: dict) -> bool:
+    """True only when AT explicitly accepted this number for the network."""
+    code = entry.get("statusCode")
+    if isinstance(code, str) and code.strip().isdigit():
+        code = int(code)
+    if isinstance(code, int) and code in AT_ACCEPTED_STATUS_CODES:
         return True
-    if parsed.get("success") is False:
-        return False
-    if str(parsed.get("status", "")).lower() in ("failed", "error"):
-        return False
-    return True
+    word = str(entry.get("status") or "").strip().lower().replace("_", "").replace(" ", "")
+    return word in AT_ACCEPTED_STATUS_WORDS
 
 
-def _parse_optional_sim_slot(raw) -> int | None:
+def _at_recipients(parsed) -> list[dict]:
+    """Pull Recipients[] out of the SMSMessageData envelope."""
+    if not isinstance(parsed, dict):
+        return []
+    data = parsed.get("SMSMessageData")
+    if not isinstance(data, dict):
+        return []
+    recipients = data.get("Recipients")
+    if not isinstance(recipients, list):
+        return []
+    return [item for item in recipients if isinstance(item, dict)]
+
+
+def _at_message_data(parsed) -> dict:
+    """The SMSMessageData envelope, which is where AT puts its verdict."""
+    if not isinstance(parsed, dict):
+        return {}
+    data = parsed.get("SMSMessageData")
+    return data if isinstance(data, dict) else {}
+
+
+def _send_via_africas_talking(to_phone: str, message: str) -> tuple[bool, str]:
     """
-    MySMSGate slot: 0 = SIM 1, 1 = SIM 2.
-    Empty / unset → None (let the gateway pick automatically).
+    Send one SMS to one student through Africa's Talking.
+
+    AT returns HTTP 200 with a per-recipient verdict inside SMSMessageData, so
+    the response body — not the status code — decides success. Anything that is
+    not an explicit accept is reported as a failure.
     """
-    text = str(raw if raw is not None else "").strip()
-    if text == "":
-        return None
-    try:
-        slot = int(text)
-    except (TypeError, ValueError):
-        return None
-    if slot in (0, 1):
-        return slot
-    return None
-
-
-def _mysmsgate_send_endpoints(configured: str) -> list[str]:
-    """Candidate send URLs — API host first (avoids Cloudflare on www)."""
-    primary = (configured or "").strip() or "https://api.mysmsgate.net/api/v1/send"
-    candidates = [
-        primary,
-        "https://api.mysmsgate.net/api/v1/send",
-        "https://mysmsgate.net/api/v1/send",
-    ]
-    seen = set()
-    out = []
-    for url in candidates:
-        key = url.rstrip("/").lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(url.rstrip("/"))
-    return out
-
-
-def _mysmsgate_post(
-    endpoint: str,
-    api_key: str,
-    payload: dict,
-    *,
-    auth_mode: str = "bearer",
-) -> tuple[bool, int, str, dict | None]:
-    """POST JSON to MySMSGate. Returns (ok, status_code, error_or_empty, parsed)."""
-    data = json.dumps(payload).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "KabQue-SMS/1.0 (+https://kabque.onrender.com)",
-    }
-    if auth_mode == "x-api-key":
-        headers["X-API-KEY"] = api_key
-    else:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    req = urllib.request.Request(
-        endpoint,
-        data=data,
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            if _looks_like_cloudflare_challenge(raw):
-                logger.error(
-                    "MySMSGate blocked by Cloudflare challenge (HTTP %s) at %s",
-                    resp.status,
-                    endpoint,
-                )
-                return (
-                    False,
-                    resp.status,
-                    _mysmsgate_hint(resp.status, raw),
-                    None,
-                )
-            parsed = None
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
-                    parsed = None
-            if _mysmsgate_accepted(resp.status, parsed):
-                logger.info(
-                    "MySMSGate accepted SMS to %s (HTTP %s, status=%s, slot=%s, sms_id=%s, via=%s)",
-                    payload.get("to"),
-                    resp.status,
-                    (parsed or {}).get("status", "ok"),
-                    payload.get("slot"),
-                    (parsed or {}).get("sms_id") or (parsed or {}).get("id"),
-                    endpoint,
-                )
-                return True, resp.status, "", parsed if isinstance(parsed, dict) else None
-            return (
-                False,
-                resp.status,
-                _mysmsgate_hint(resp.status, _parse_mysmsgate_error(raw or "")),
-                parsed if isinstance(parsed, dict) else None,
-            )
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        if _looks_like_cloudflare_challenge(detail):
-            logger.error(
-                "MySMSGate Cloudflare challenge (HTTP %s) at %s — datacenter IP blocked",
-                exc.code,
-                endpoint,
-            )
-        else:
-            logger.error(
-                "MySMSGate SMS failed (%s) payload_keys=%s via=%s: %s",
-                exc.code,
-                sorted(payload.keys()),
-                endpoint,
-                detail[:400],
-            )
-        return (
-            False,
-            exc.code,
-            _mysmsgate_hint(exc.code, _parse_mysmsgate_error(detail, detail)),
-            None,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("MySMSGate SMS network error via %s", endpoint)
-        return False, 0, str(exc)[:160], None
-
-
-def _mysmsgate_post_with_fallback(
-    api_key: str, payload: dict, configured_url: str
-) -> tuple[bool, int, str, dict | None]:
-    """Try API host + auth header variants until one accepts JSON."""
-    last = (False, 0, "SMS send failed", None)
-    for endpoint in _mysmsgate_send_endpoints(configured_url):
-        for auth_mode in ("bearer", "x-api-key"):
-            ok, code, err, parsed = _mysmsgate_post(
-                endpoint, api_key, payload, auth_mode=auth_mode
-            )
-            last = (ok, code, err, parsed)
-            if ok:
-                return last
-            # Cloudflare on this host — try next host/auth immediately.
-            if err and "blocking that connection" in err.lower():
-                continue
-            # Non-challenge auth failure on a host — still try other auth/host.
-            continue
-    return last
-
-
-def _mysmsgate_poll_status(api_key: str, sms_id) -> str:
-    """Return latest provider status string for an SMS id (best-effort)."""
-    if sms_id in (None, ""):
-        return ""
-    for base in (
-        "https://api.mysmsgate.net/api/v1/sms",
-        "https://mysmsgate.net/api/v1/sms",
-    ):
-        url = f"{base}?id={sms_id}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Accept": "application/json",
-                "User-Agent": "KabQue-SMS/1.0 (+https://kabque.onrender.com)",
-            },
-            method="GET",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-                if _looks_like_cloudflare_challenge(raw):
-                    continue
-                parsed = json.loads(raw) if raw else {}
-        except Exception:  # noqa: BLE001
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        return str(
-            parsed.get("status")
-            or parsed.get("state")
-            or (parsed.get("sms") or {}).get("status")
-            or ""
-        ).strip().lower()
-    return ""
-
-
-def _send_via_mysmsgate(to_phone: str, message: str) -> tuple[bool, str]:
-    """
-    Send one SMS via MySMSGate TO the student phone only.
-
-    Your Android phone is only the *sender* (gateway). The recipient must be the
-    student's registered number. If texts land in *your* inbox as received, that
-    usually means the profile phone is actually one of your own SIMs (self-SMS
-    on a dual-SIM phone) — not that KabQue rewrote the destination.
-    """
-    api_key = (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
-    if api_key.lower().startswith("bearer "):
-        api_key = api_key[7:].strip()
+    api_key = _at_setting("AFRICAS_TALKING_API_KEY")
     if not api_key:
-        return False, (
-            "Text messages could not be sent. SMS is not fully set up yet — "
-            "ask the system admin to finish setup, then try again."
-        )
+        return False, SMS_NOT_SET_UP_ERROR
 
-    # MySMSGate requires international E.164: +CC… (e.g. +2567XXXXXXXX).
+    username = _at_setting("AFRICAS_TALKING_USERNAME")
+    if _at_is_sandbox() and not username:
+        username = "sandbox"
+    if not username:
+        return False, SMS_NOT_SET_UP_ERROR
+
+    # AT requires international E.164 with a country code (e.g. +2567XXXXXXXX).
     try:
         recipient = to_sms_destination(to_phone)
     except ValueError:
+        return False, SMS_BAD_NUMBER_ERROR
+
+    sender = _at_sender_id()
+    if not _at_is_sandbox() and not sender:
         return False, (
-            "Text messages could not be sent — that student’s phone number looks "
-            "incomplete. Update their profile and try again."
+            "Text messages could not be sent because no SMS sender ID is set on the "
+            "server. Ask the system admin to finish the SMS setup, then try again."
         )
 
-    endpoint = (
-        getattr(settings, "MYSMSGATE_API_URL", "") or "https://mysmsgate.net/api/v1/send"
-    ).strip()
+    # 1600 characters is AT's documented hard limit for a single request.
+    text = (message or "").strip()[:1600]
+    if not text:
+        return False, "Text messages could not be sent — the message was empty."
 
-    device_id = (getattr(settings, "MYSMSGATE_DEVICE_ID", "") or "").strip()
-    # Ignore obvious placeholders so a bad device id cannot poison auth/routing.
-    if device_id.lower() in ("", "none", "null", "undefined", "your_device_id"):
-        device_id = ""
-    configured_slot = _parse_optional_sim_slot(
-        getattr(settings, "MYSMSGATE_SIM_SLOT", None)
+    payload = {
+        "username": username,
+        "to": recipient,
+        "message": text,
+        "bulkSMSMode": 1,
+    }
+    # Omit `from` entirely in the sandbox — see _at_sender_id().
+    if sender:
+        payload["from"] = sender
+
+    base_url = _at_setting("AFRICAS_TALKING_BASE_URL") or "https://api.africastalking.com"
+    endpoint = f"{base_url.rstrip('/')}/version1/messaging"
+    environment = "sandbox" if _at_is_sandbox() else "production"
+
+    # AT's /version1/messaging endpoint accepts form encoding ONLY. Posting JSON
+    # returns HTTP 415 "The request's Content-Type [application/json] is not
+    # supported", which is a permanent server misconfiguration — not a student
+    # number problem — so it must never be reported as one.
+    data = urllib.parse.urlencode(payload).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=data,
+        headers={
+            "apiKey": api_key,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "KabQue-SMS/1.0 (+https://kabque.onrender.com)",
+        },
+        method="POST",
     )
-    text = message[:1000]
 
-    # Prefer the simple docs payload (no slot / optional device), then SIM fallbacks.
-    preferred_slot = configured_slot
-    fallback_slot = 1 if (preferred_slot or 0) == 0 else 0
-
-    def _payload(*, slot=None, include_device: bool = True) -> dict:
-        body = {"to": recipient, "message": text}
-        if slot is not None:
-            body["slot"] = int(slot)
-        if include_device and device_id:
-            body["device_id"] = device_id
-        return body
-
-    attempts = [
-        _payload(include_device=True),
-        _payload(include_device=False),
-        _payload(slot=preferred_slot if preferred_slot is not None else 0),
-        _payload(slot=fallback_slot),
-    ]
-    seen = set()
-    unique: list[dict] = []
-    for payload in attempts:
-        if payload.get("to") != recipient:
-            continue
-        key = tuple(sorted((k, str(v)) for k, v in payload.items()))
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(payload)
-
-    last_error = (
-        "Text messages could not be sent right now. Keep the gateway phone online "
-        "and try again in a moment."
-    )
-    for payload in unique:
-        ok, _code, err, parsed = _mysmsgate_post_with_fallback(
-            api_key, payload, endpoint
-        )
-        if not ok:
-            if err:
-                last_error = err
-            continue
-
-        sms_id = None
-        if isinstance(parsed, dict):
-            sms_id = parsed.get("sms_id") or parsed.get("id")
-
-        # Poll until the gateway reports a TERMINAL status.
-        #
-        # A 202 only means the gateway ACCEPTED the message for queuing; it says
-        # nothing about whether the carrier actually transmitted it. Accepting
-        # "sending"/"pending" as success made the desk show a green tick for
-        # messages that were later marked failed. Keep polling until we see a
-        # real outcome, and treat a still-unknown outcome as NOT delivered.
-        final_status = ""
-        if sms_id not in (None, ""):
-            deadline = time.monotonic() + SMS_POLL_SECONDS
-            while time.monotonic() < deadline:
-                time.sleep(SMS_POLL_INTERVAL)
-                final_status = _mysmsgate_poll_status(api_key, sms_id)
-                if final_status in SMS_TERMINAL_FAILURES or (
-                    final_status in SMS_TERMINAL_SUCCESSES
-                ):
-                    break
-                # "sending"/"pending"/"" are in-flight: keep waiting.
-
-        if final_status in SMS_TERMINAL_FAILURES:
-            last_error = (
-                "Text messages could not be sent from the gateway phone. "
-                "Check airtime, keep the SMS app online, then try again."
-            )
-            logger.warning(
-                "MySMSGate SMS to %s failed after accept (sms_id=%s, status=%s, slot=%s)",
-                recipient,
-                sms_id,
-                final_status,
-                payload.get("slot"),
-            )
-            continue
-
-        if final_status not in SMS_TERMINAL_SUCCESSES:
-            # Still queued, or the gateway never told us. Do not claim success,
-            # and do not retry with another payload: this message is already
-            # queued on the phone and will send itself, so a retry would deliver
-            # the student a duplicate code.
-            last_error = SMS_UNCONFIRMED_ERROR
-            logger.warning(
-                "MySMSGate SMS to %s unconfirmed (sms_id=%s, status=%r, slot=%s). "
-                "Treating as not delivered so the desk does not show a false success.",
-                recipient,
-                sms_id,
-                final_status,
-                payload.get("slot"),
-            )
-            return False, last_error
-
-        logger.info(
-            "MySMSGate SMS to student %s ok (sms_id=%s, status=%s, slot=%s)",
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        logger.error(
+            "Africa's Talking SMS failed (HTTP %s, env=%s, to=%s, from=%r): %s",
+            exc.code,
+            environment,
             recipient,
-            sms_id,
-            final_status,
-            payload.get("slot"),
+            sender,
+            detail[:400],
         )
-        return True, ""
+        return False, _at_hint(exc.code, _at_parse_error(detail, detail))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Africa's Talking SMS network error to %s", recipient)
+        return False, (
+            "Text messages could not be sent right now — the SMS provider could not "
+            "be reached. Try again in a moment."
+        )
 
-    return False, last_error
+    try:
+        parsed = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict) and (parsed.get("errorMessage") or parsed.get("errorCode")):
+        detail = _at_parse_error(raw)
+        logger.error(
+            "Africa's Talking error envelope (env=%s, to=%s): %s", environment, recipient, detail
+        )
+        return False, _at_hint(0, detail)
+
+    recipients = _at_recipients(parsed)
+    if not recipients:
+        # AT reports whole-request failures (e.g. "InvalidSenderId", "Sent to 0/1")
+        # in SMSMessageData.Message with an EMPTY Recipients array, under HTTP 201.
+        # That field is the only place the real reason appears.
+        detail = str(_at_message_data(parsed).get("Message") or "").strip()
+        logger.error(
+            "Africa's Talking returned no recipient verdict (env=%s, to=%s, from=%r, message=%r): %s",
+            environment,
+            recipient,
+            sender or "(omitted)",
+            detail,
+            raw[:400],
+        )
+        return False, _at_hint(0, detail or "no recipient verdict returned")
+
+    for entry in recipients:
+        if not _at_recipient_accepted(entry):
+            detail = str(entry.get("status") or "Unknown")
+            logger.warning(
+                "Africa's Talking refused SMS to %s (env=%s, statusCode=%s, status=%s, messageId=%s)",
+                recipient,
+                environment,
+                entry.get("statusCode"),
+                entry.get("status"),
+                entry.get("messageId"),
+            )
+            return False, _at_hint(0, detail)
+
+    entry = recipients[0]
+    logger.info(
+        "Africa's Talking accepted SMS to %s (env=%s, from=%r, statusCode=%s, messageId=%s, cost=%s)",
+        recipient,
+        environment,
+        sender,
+        entry.get("statusCode"),
+        entry.get("messageId"),
+        entry.get("cost"),
+    )
+    return True, ""
 
 
 def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
     """
-    Send SMS via MySMSGate to the student's profile phone.
+    Send an SMS to the student's profile phone via Africa's Talking.
 
-    Always normalizes to E.164 with country code (+256… / +254… / etc.) before
-    calling the gateway — MySMSGate rejects bare local numbers.
+    Always normalizes to E.164 with a country code (+256… / +254… / etc.) before
+    calling AT — AT rejects bare local numbers.
     """
     raw = (phone or "").strip()
     if not raw:
@@ -686,54 +540,21 @@ def send_sms_notification(phone: str, body: str) -> tuple[bool, str]:
         try:
             to_phone = to_sms_destination(normalize_phone(raw))
         except ValueError:
-            return False, (
-                "Text messages could not be sent — that student’s phone number must "
-                "include a country code (e.g. Uganda +256…)."
-            ) if "country" in str(exc).lower() else (
-                "Text messages could not be sent — that student’s phone number looks "
-                "incomplete. Update their profile and try again."
-            )
+            if "country" in str(exc).lower():
+                return False, (
+                    "Text messages could not be sent — that student’s phone number must "
+                    "include a country code (e.g. Uganda +256…)."
+                )
+            return False, SMS_BAD_NUMBER_ERROR
 
-    if (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip():
-        return _send_via_mysmsgate(to_phone, body)
-
-    username = getattr(settings, "AFRICAS_TALKING_USERNAME", "") or ""
-    api_key = getattr(settings, "AFRICAS_TALKING_API_KEY", "") or ""
-
-    if username and api_key:
-        try:
-            data = json.dumps(
-                {
-                    "username": username,
-                    "to": to_phone,
-                    "message": body[:480],
-                }
-            ).encode()
-            req = urllib.request.Request(
-                "https://api.africastalking.com/version1/messaging",
-                data=data,
-                headers={
-                    "ApiKey": api_key,
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                resp.read()
-            return True, ""
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("SMS send failed")
-            return False, str(exc)[:120]
-
-    return False, "MySMSGate API key missing on server"
+    return _send_via_africas_talking(to_phone, body)
 
 
 def resolve_student_contacts(user) -> tuple[str, str]:
     """
     Email + phone the fresher saved on their profile (post-signup).
     Phone is always returned in E.164 with country code when valid
-    (MySMSGate needs +CC…, e.g. +2567XXXXXXXX).
+    (Africa's Talking needs +CC…, e.g. +2567XXXXXXXX).
     """
     email = normalize_email(getattr(user, "email", "") or "")
     raw_phone = getattr(user, "phone", "") or ""
@@ -825,7 +646,7 @@ def deliver_student_notification(
                 }
             )
             if ok:
-                logger.info("KabQue SMS delivered to %s", phone)
+                logger.info("KabQue SMS accepted for %s", phone)
             else:
                 logger.warning("KabQue SMS failed to %s: %s", phone, err)
         else:

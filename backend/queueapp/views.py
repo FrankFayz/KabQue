@@ -254,7 +254,7 @@ def ensure_batch_membership(
     Link a student to a batch inside the same DB transaction as notify/reschedule.
 
     Visibility in “Awaiting desk approval” depends on NotificationLog.queue_entry.
-    Creating this row immediately (before Brevo/MySMSGate) prevents students from
+    Creating this row immediately (before Brevo/Africa's Talking) prevents students from
     vanishing when delivery is async or when soft-refresh runs early.
     """
     NotificationLog.ensure_nullable_queue_entry()
@@ -466,7 +466,7 @@ def batch_delivery_stats(batch) -> dict:
     Live email/SMS totals for a batch, derived from NotificationLog rows.
 
     delivery_pending stays True while any placeholder “pending” membership
-    rows remain (background Brevo / MySMSGate still in flight).
+    rows remain (background Brevo / Africa's Talking still in flight).
     """
     batch_id = batch.id if hasattr(batch, "id") else batch
     pending_n = NotificationLog.objects.filter(
@@ -627,7 +627,7 @@ def apply_reschedule(entry, scheduled_date, *, notify=True, channel="both", posi
     Assign secret code + approval day. When notify=True, send only on the
     supervisor channel (email | sms | both).
     Prefer notify=False inside a DB transaction, then call
-    deliver_approval_notice() after commit so Brevo/MySMSGate are not held
+    deliver_approval_notice() after commit so Brevo/Africa's Talking are not held
     behind row locks.
     """
     channel = normalize_notify_channel(channel)
@@ -742,7 +742,7 @@ def log_delivery_attempts(batch, entry, *, scheduled_date, code, position, chann
 
 
 def _deliver_prepared_notices(*, batch_id, prepared_items, scheduled_date, channel):
-    """Send Brevo / MySMSGate for a prepared batch (runs off the HTTP thread)."""
+    """Send Brevo / Africa's Talking for a prepared batch (runs off the HTTP thread)."""
     close_old_connections()
     try:
         batch = NotificationBatch.objects.filter(pk=batch_id).first()
@@ -918,14 +918,15 @@ def channel_delivery_summary(channel, *, email_ok, email_fail, sms_ok, sms_fail)
 
 
 def delivery_configured() -> dict:
-    """Whether Brevo / MySMSGate keys are present on this server."""
+    """Whether Brevo / Africa's Talking keys are present on this server."""
+    sms_ready = bool((getattr(settings, "AFRICAS_TALKING_API_KEY", "") or "").strip())
+    if sms_ready and (getattr(settings, "AFRICAS_TALKING_ENVIRONMENT", "") or "") == "production":
+        sms_ready = bool((getattr(settings, "AFRICAS_TALKING_SHORTCODE", "") or "").strip())
     return {
         "email_configured": bool(
             (getattr(settings, "BREVO_API_KEY", "") or "").strip()
         ),
-        "sms_configured": bool(
-            (getattr(settings, "MYSMSGATE_API_KEY", "") or "").strip()
-        ),
+        "sms_configured": sms_ready,
     }
 
 
@@ -2077,7 +2078,7 @@ class NotifyBatchView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Schedule Brevo / MySMSGate after response — do not block the desk UI.
+        # Schedule Brevo / Africa's Talking after response — do not block the desk UI.
         queue_prepared_notices(
             batch_id=batch_id,
             prepared_items=prepared,

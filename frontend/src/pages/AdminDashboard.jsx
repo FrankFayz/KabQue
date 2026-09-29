@@ -318,7 +318,7 @@ export default function AdminDashboard() {
         });
       } else if (data.sms_failed && (mode === 'sms' || mode === 'both')) {
         setNotifyMessage(
-          `Batch prepared. Emails: ${data.emails_sent ?? 0}. Text messages could not be sent for ${data.sms_failed} student(s) — keep the gateway phone online and try again.`
+          `Batch prepared. Emails: ${data.emails_sent ?? 0}. Text messages could not be sent for ${data.sms_failed} student(s) — check the SMS account and try again.`
         );
       } else {
         setNotifyMessage(

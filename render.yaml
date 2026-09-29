@@ -12,15 +12,16 @@ services:
       - key: DJANGO_SETTINGS_MODULE
         value: kabque.settings
       # Set these in the Render dashboard (Environment) — do not commit real values
-      - key: MYSMSGATE_API_KEY
+      # Africa's Talking — SMS. Start in sandbox; real students are only reached
+      # once this is flipped to "production" with a funded account.
+      - key: AFRICAS_TALKING_API_KEY
         sync: false
-      - key: MYSMSGATE_API_URL
-        value: https://mysmsgate.net/api/v1/send
-      - key: MYSMSGATE_DEVICE_ID
-        sync: false
-      # Optional. MySMSGate: 0 = SIM 1, 1 = SIM 2. Leave unset for auto.
-      # Do NOT hardcode "1" unless the gateway phone really uses SIM 2.
-      - key: MYSMSGATE_SIM_SLOT
+      - key: AFRICAS_TALKING_ENVIRONMENT
+        value: sandbox
+      # Required for production only — your approved alphanumeric sender ID
+      # (e.g. KabQue) or numeric shortcode. The sandbox app username is
+      # always literally "sandbox" and the sender is ignored there.
+      - key: AFRICAS_TALKING_SHORTCODE
         sync: false
       - key: BREVO_API_KEY
         sync: false

@@ -1,4 +1,4 @@
-"""East African phone numbers normalized to E.164 for MySMSGate."""
+"""East African phone numbers normalized to E.164 for Africa's Talking."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def _digits(value: str) -> str:
 
 def to_sms_destination(phone: str) -> str:
     """
-    Final gate for MySMSGate: always E.164 with country code (+CC…).
+    Final gate for SMS delivery: always E.164 with country code (+CC…).
 
     Examples: +2567XXXXXXXX (UG), +2547XXXXXXXX (KE).
     Raises ValueError if the number cannot be made international.

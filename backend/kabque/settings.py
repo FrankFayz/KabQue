@@ -173,14 +173,6 @@ def _clean_env(value: str) -> str:
     return text
 
 
-def _clean_mysmsgate_api_key(value: str) -> str:
-    """Normalize MySMSGate keys pasted from dashboards (quotes / Bearer prefix)."""
-    key = _clean_env(value)
-    if key.lower().startswith("bearer "):
-        key = key[7:].strip()
-    return key
-
-
 # Brevo (Sendinblue) transactional email — used when BREVO_API_KEY is set
 BREVO_API_KEY = _clean_env(os.getenv("BREVO_API_KEY", ""))
 BREVO_SENDER_EMAIL = _clean_env(os.getenv("BREVO_SENDER_EMAIL", ""))
@@ -199,15 +191,33 @@ NATIONWIDE_GPS_TESTING = os.getenv("NATIONWIDE_GPS_TESTING", "False").lower() in
     "yes",
 )
 
-# MySMSGate — SMS via your connected Android phone
-MYSMSGATE_API_KEY = _clean_mysmsgate_api_key(os.getenv("MYSMSGATE_API_KEY", ""))
-# Prefer the API host — www mysmsgate.net is fronted by Cloudflare and often
-# challenges Render datacenter IPs (403 HTML "Just a moment...").
-MYSMSGATE_API_URL = _clean_env(
-    os.getenv("MYSMSGATE_API_URL", "https://api.mysmsgate.net/api/v1/send")
-) or "https://api.mysmsgate.net/api/v1/send"
-MYSMSGATE_DEVICE_ID = _clean_env(os.getenv("MYSMSGATE_DEVICE_ID", ""))
-MYSMSGATE_SIM_SLOT = _clean_env(os.getenv("MYSMSGATE_SIM_SLOT", ""))
+# Africa's Talking — SMS delivery
+# ENVIRONMENT picks the host. "sandbox" only reaches numbers you registered as
+# test numbers in the AT dashboard, and the sender always shows as "sandbox".
+# Switch to "production" once you have a live key, credit, and an approved
+# alphanumeric sender ID.
+AFRICAS_TALKING_ENVIRONMENT = (
+    _clean_env(os.getenv("AFRICAS_TALKING_ENVIRONMENT", "sandbox")).lower() or "sandbox"
+)
+if AFRICAS_TALKING_ENVIRONMENT not in ("sandbox", "production"):
+    AFRICAS_TALKING_ENVIRONMENT = "sandbox"
 
-AFRICAS_TALKING_USERNAME = os.getenv("AFRICAS_TALKING_USERNAME", "")
-AFRICAS_TALKING_API_KEY = os.getenv("AFRICAS_TALKING_API_KEY", "")
+AFRICAS_TALKING_API_KEY = _clean_env(
+    os.getenv("AFRICAS_TALKING_API_KEY", "") or os.getenv("AT_API_KEY", "")
+)
+# The sandbox app username is always literally "sandbox".
+AFRICAS_TALKING_USERNAME = (
+    _clean_env(os.getenv("AFRICAS_TALKING_USERNAME", "") or os.getenv("AT_USERNAME", ""))
+    or ("sandbox" if AFRICAS_TALKING_ENVIRONMENT == "sandbox" else "")
+)
+# Your approved alphanumeric sender ID (e.g. "KabQue") or numeric shortcode.
+# Ignored by AT in the sandbox, where every message shows as "sandbox".
+AFRICAS_TALKING_SHORTCODE = _clean_env(
+    os.getenv("AFRICAS_TALKING_SHORTCODE", "") or os.getenv("AT_SHORTCODE", "")
+)
+
+AFRICAS_TALKING_BASE_URL = (
+    "https://api.sandbox.africastalking.com"
+    if AFRICAS_TALKING_ENVIRONMENT == "sandbox"
+    else "https://api.africastalking.com"
+)

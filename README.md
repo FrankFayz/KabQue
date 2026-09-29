@@ -64,7 +64,33 @@ Secrets live in `backend/.env` (not committed):
 | `CAMPUS_LATITUDE` / `CAMPUS_LONGITUDE` | Kikungiri campus centre |
 | `CAMPUS_RADIUS_METERS` | Geofence radius (default 800) |
 | `GPS_ENFORCEMENT` | `True`/`False` — set `False` only for off-campus testing |
-| `AFRICAS_TALKING_USERNAME` / `API_KEY` | Real SMS (optional; otherwise SMS is printed in the server console) |
+| `AFRICAS_TALKING_API_KEY` | Africa's Talking SMS key (sandbox or live) |
+| `AFRICAS_TALKING_USERNAME` | AT app username — always literally `sandbox` in the sandbox |
+| `AFRICAS_TALKING_ENVIRONMENT` | `sandbox` (default) or `production`. Sandbox only reaches numbers registered as test numbers and always shows the sender as `sandbox` |
+| `AFRICAS_TALKING_SHORTCODE` | Approved alphanumeric sender ID (e.g. `KabQue`) — **required for production**, ignored in the sandbox |
+
+Short aliases `AT_API_KEY`, `AT_USERNAME` and `AT_SHORTCODE` are also accepted.
+
+Verify with `python manage.py check_delivery`, which reports the AT environment
+and warns loudly if you are still in the sandbox.
+
+To prove the key, host, encoding and sender ID against the live API without
+going through the queue UI:
+
+```
+python manage.py send_test_sms +2567XXXXXXXX
+```
+
+Two behaviours of the live API that contradict its documentation, found by
+calling it and now pinned by tests:
+
+* `/version1/messaging` accepts **form encoding only** — a JSON body returns
+  HTTP 415.
+* The sandbox **rejects every `from` value** with
+  `{"SMSMessageData": {"Message": "InvalidSenderId", "Recipients": []}}`,
+  including `"sandbox"` and `""`. The field must be omitted entirely.
+  Whole-request failures arrive under HTTP 201 with an empty `Recipients`
+  array, so the real reason has to be read from `SMSMessageData.Message`.
 
 Emails use Django's console backend in development (messages appear in the `runserver` terminal).
 
