@@ -2,9 +2,11 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import views
+from .chatbot import ChatView
 
 urlpatterns = [
     path("auth/register/", views.RegisterView.as_view(), name="register"),
+    path("chat/", ChatView.as_view(), name="chat"),
     path("auth/login/", views.LoginView.as_view(), name="login"),
     path(
         "auth/verify-supervisor-email/",

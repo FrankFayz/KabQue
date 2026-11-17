@@ -126,6 +126,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ),
+    "DEFAULT_THROTTLE_RATES": {"chat": "20/hour"},
 }
 
 SIMPLE_JWT = {

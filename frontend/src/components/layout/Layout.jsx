@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import Brand from './Brand';
 import NavBar from './NavBar';
+import ChatWidget from '../chat/ChatWidget';
 
 export default function Layout() {
   const { pathname } = useLocation();
@@ -15,6 +16,7 @@ export default function Layout() {
       <main className={isHome ? 'main main-home' : 'main'}>
         <Outlet />
       </main>
+      <ChatWidget />
       {!isHome && (
         <footer className="footer">
           <img src="/kabale-badge.png" alt="" width={28} height={28} />
