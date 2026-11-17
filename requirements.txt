@@ -9,3 +9,4 @@ python-dotenv>=1.0
 geopy>=2.4
 django-filter>=24.0
 gunicorn>=22.0
+groq>=0.11
