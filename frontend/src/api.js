@@ -1,12 +1,11 @@
 const configured = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
 
-// Never call the Vercel frontend host for API — always use Render in production.
-const API_URL =
-  configured && /^https?:\/\//i.test(configured)
-    ? configured
-    : import.meta.env.PROD
-      ? 'https://kabque.onrender.com/api'
-      : '/api';
+// Call the API on the same site (/api). Vercel forwards /api/* to Render
+// (see vercel.json), so the browser never has to reach onrender.com directly.
+const API_URL = configured || '/api';
+
+// Render backend origin — only used to wake the free dyno early.
+const RENDER_ORIGIN = 'https://kabque.onrender.com';
 
 const FRIENDLY_DEFAULT = 'Something went wrong. Please try again.';
 const FRIENDLY_OFFLINE =
@@ -49,8 +48,7 @@ let _warmStarted = false;
 export function warmApi() {
   if (_warmStarted) return;
   _warmStarted = true;
-  const base = API_URL.replace(/\/api\/?$/, '');
-  const healthUrl = `${base}/`;
+  const healthUrl = `${RENDER_ORIGIN}/`;
   // Ignore result — purpose is only to start the backend / DB.
   fetch(healthUrl, { method: 'GET', cache: 'no-store', mode: 'cors' }).catch(
     () => {}
@@ -335,7 +333,6 @@ export function friendlyUserMessage(raw, fallback = FRIENDLY_DEFAULT) {
     if (pattern.test(text)) return message;
   }
 
-  // Strip "Could not …: technical residual" style prefixes when the rest is noisy
   const colonSplit = text.match(/^([^:]{8,80}):\s*(.+)$/);
   if (colonSplit && looksTechnical(colonSplit[2])) {
     const head = colonSplit[1].trim();
@@ -352,7 +349,7 @@ export function friendlyUserMessage(raw, fallback = FRIENDLY_DEFAULT) {
   return fallback || FRIENDLY_DEFAULT;
 }
 
-/** Use in catch blocks: userError(err, 'Could not save.') */
+
 export function userError(err, fallback = FRIENDLY_DEFAULT) {
   if (err == null || err === '') return fallback;
   if (typeof err === 'string') return friendlyUserMessage(err, fallback);
@@ -488,7 +485,6 @@ function errorFromPayload(data, status = 0, { auth = true } = {}) {
   const raw = extractRawMessage(data, '');
   if (raw) {
     const friendly = friendlyUserMessage(raw, statusFallback);
-    // Never leak a technical raw string — friendlyUserMessage already gates this
     if (friendly) return friendly;
   }
 
@@ -580,5 +576,3 @@ export function getCurrentPosition() {
     );
   });
 }
-
-// Prefer captureCampusLocation from geo/campusLocation.js for join-queue.
