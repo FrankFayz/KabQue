@@ -8,7 +8,7 @@ Wire it up in urls.py:
 
 Env vars (backend/.env locally, Render dashboard in production — never in the frontend):
     GROQ_API_KEY=gsk_...
-    CHATBOT_MODEL=llama-3.3-70b-versatile     # optional
+    CHATBOT_MODEL=openai/gpt-oss-120b     # optional; see console.groq.com/docs/models
 """
 
 import json
@@ -31,7 +31,7 @@ from .views import (
 
 log = logging.getLogger(__name__)
 
-MODEL = os.getenv("CHATBOT_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.getenv("CHATBOT_MODEL", "openai/gpt-oss-120b")
 MAX_HISTORY = 12          # messages kept from the browser
 MAX_USER_CHARS = 1000     # per message
 MAX_TOOL_ROUNDS = 4
@@ -163,9 +163,11 @@ class ChatView(APIView):
         try:
             from groq import Groq
         except ImportError:
+            log.error("Chat: the 'groq' package is not installed on this server.")
             return Response({"detail": "Chat is not configured."}, status=503)
 
         if not os.getenv("GROQ_API_KEY"):
+            log.error("Chat: GROQ_API_KEY is not set on this server.")
             return Response({"detail": "Chat is not configured."}, status=503)
 
         client = Groq()  # reads GROQ_API_KEY
@@ -178,8 +180,10 @@ class ChatView(APIView):
                     messages=messages,
                     tools=TOOLS,
                     tool_choice="auto",
-                    max_tokens=600,
+                    max_tokens=1500,
                     temperature=0.3,
+                    # gpt-oss "thinks" before answering; keep that short and fast.
+                    extra_body={"reasoning_effort": "low"},
                 )
                 msg = resp.choices[0].message
                 if not msg.tool_calls:
@@ -211,7 +215,7 @@ class ChatView(APIView):
                         }
                     )
         except Exception:
-            log.exception("Groq chat call failed")
+            log.exception("Chat: Groq call failed (model=%s)", MODEL)
             return Response(
                 {"detail": "The assistant is busy. Please try again shortly."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
